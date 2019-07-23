@@ -157,7 +157,7 @@ void OvrApp::EnteredVrMode(const ovrIntentType intentType, const char *intentFro
         OVR_LOG("INIT VRVB EMULATOR2");
         DrawHelper::Init(MENU_WIDTH, MENU_HEIGHT);
 
-        Emulator::RestButtonMapping();
+        Emulator::ResetButtonMapping();
 
         OVR_LOG("INIT VRVB EMULATOR Load Settings");
         LoadSettings();
