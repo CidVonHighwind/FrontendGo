@@ -24,7 +24,7 @@ namespace LayerBuilder {
     ovrLayerCylinder2 BuildGameCylinderLayer3D(ovrTextureSwapChain *cylinderSwapChain,
                                                const int textureWidth, const int textureHeight,
                                                const ovrTracking2 *tracking, bool followHead,
-                                               bool threedee, float threedeeoffset);
+                                               bool threedee, float threedeeoffset, float ipd);
 }  // namespace LayerBuilder
 
 #endif

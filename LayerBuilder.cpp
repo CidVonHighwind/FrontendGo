@@ -27,7 +27,7 @@ namespace LayerBuilder {
         screenSize = 1.0f;
     }
 
-    float ScreenScale(){
+    float ScreenScale() {
         return screenSize * 0.65f;
     }
 
@@ -207,7 +207,7 @@ namespace LayerBuilder {
     }
 
     ovrLayerCylinder2 BuildGameCylinderLayer3D(ovrTextureSwapChain *cylinderSwapChain, const int textureWidth, const int textureHeight,
-                                               const ovrTracking2 *tracking, bool followHead, bool threedee, float threedeeoffset) {
+                                               const ovrTracking2 *tracking, bool followHead, bool threedee, float threedeeoffset, float ipd) {
         ovrLayerCylinder2 layer = vrapi_DefaultLayerCylinder2();
 
         const float fadeLevel = 1.0f;
@@ -217,18 +217,29 @@ namespace LayerBuilder {
 
         layer.HeadPose = tracking->HeadPose;
 
-        // x2: 3250.0f
-        const ovrVector3f translation = tracking->HeadPose.Pose.Position;
-
-        // 0.252717949
-        ovrMatrix4f cylinderTransform = CylinderModelMatrix(textureHeight, translation, radiusMenuScreen + radiusMenuScreen * 0.02f,
-                                                            followHead ? &currentfQuat : nullptr, 0);
-
         float aspectRation = (float) textureWidth / (float) textureHeight;
         const float circScale = (1.0f * (180 / 60.0f) / aspectRation) / ScreenScale();// density * 0.5f / textureWidth;
         const float circBias = -circScale * (0.5f * (1.0f - 1.0f / circScale));
 
         for (int eye = 0; eye < VRAPI_FRAME_LAYER_EYE_MAX; eye++) {
+
+            // x2: 3250.0f
+            Vector3f transform = {tracking->HeadPose.Pose.Position.x, tracking->HeadPose.Pose.Position.y, tracking->HeadPose.Pose.Position.z};
+            ovrQuatf orientation = tracking->HeadPose.Pose.Orientation;
+            Quatf rotation = {orientation.x, orientation.y, orientation.z, orientation.w};
+
+            if (threedee)
+                if (eye == VRAPI_FRAME_LAYER_EYE_LEFT) {
+                    transform += (Vector3f(-1.0f, 0.0f, 0.0f) * rotation) * ((threedeeoffset / 2) * radiusMenuScreen + ipd / 2);
+                } else {
+                    transform += (Vector3f(1.0f, 0.0f, 0.0f) * rotation) * ((threedeeoffset / 2) * radiusMenuScreen + ipd / 2);
+                }
+
+            // 0.252717949
+            ovrVector3f transf = {transform.x, transform.y, transform.z};
+            ovrMatrix4f cylinderTransform = CylinderModelMatrix(textureHeight, transf,
+                                                                radiusMenuScreen + radiusMenuScreen * 0.02f, followHead ? &currentfQuat : nullptr, 0);
+
             ovrMatrix4f modelViewMatrix = ovrMatrix4f_Multiply(&tracking->Eye[eye].ViewMatrix, &cylinderTransform);
 
             layer.Textures[eye].TexCoordsFromTanAngles = ovrMatrix4f_Inverse(&modelViewMatrix);
@@ -251,17 +262,17 @@ namespace LayerBuilder {
             layer.Textures[eye].TextureMatrix.M[1][1] = texScaleY;
             layer.Textures[eye].TextureMatrix.M[1][2] = texBiasY;
 
-            // not so sure if this is the right thing to do...
-            float offset = (threedeeoffset / 2) * (1 - ScreenScale()) + ScreenScale() * 0.015f;
-
-            if (eye == 0 && threedee) {
-//                layer.Textures[eye].TextureMatrix.M[0][0] -= offset;
-                layer.Textures[eye].TextureMatrix.M[0][2] -= offset;
-            }
-            if (eye == 1 && threedee) {
-//                layer.Textures[eye].TextureMatrix.M[0][0] += offset;
-                layer.Textures[eye].TextureMatrix.M[0][2] += offset;
-            }
+//            // not so sure if this is the right thing to do...
+//            float offset = (threedeeoffset / 2) * (1 - ScreenScale()) + ScreenScale() * 0.015f;
+//
+//            if (eye == 0 && threedee) {
+////                layer.Textures[eye].TextureMatrix.M[0][0] -= offset;
+//                layer.Textures[eye].TextureMatrix.M[0][2] -= offset;
+//            }
+//            if (eye == 1 && threedee) {
+////                layer.Textures[eye].TextureMatrix.M[0][0] += offset;
+//                layer.Textures[eye].TextureMatrix.M[0][2] += offset;
+//            }
 
             layer.Textures[eye].TextureRect.y = (eye == 1 && threedee) ? 0.5f : 0.0f;
             layer.Textures[eye].TextureRect.width = 1.0f;

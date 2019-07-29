@@ -163,6 +163,7 @@ void OvrApp::EnteredVrMode(const ovrIntentType intentType, const char *intentFro
 
         romFolderPath = appStoragePath;
         romFolderPath += Emulator::romFolderPath;
+        OVR_LOG_WITH_TAG("OvrApp", "romFolderPath: %s", romFolderPath.data());
 
         OVR_LOG_WITH_TAG("OvrApp", "Emulator Init");
         Emulator::Init(appStoragePath);
