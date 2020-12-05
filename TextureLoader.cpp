@@ -1,9 +1,9 @@
+#include "TextureLoader.h"
+
 #include <gli/texture.hpp>
 #include <gli/load.hpp>
-#include "TextureLoader.h"
-#include <OVR_FileSys.h>
 
-using namespace OVR;
+#include <OVR_LogUtils.h>
 
 namespace TextureLoader {
 
@@ -20,12 +20,12 @@ namespace TextureLoader {
     }
 
     /// Filename can be KTX or DDS files
-    GLuint Load_Texture(const void *Data, std::size_t Size) {
+    GLuint Load_Texture(const void *Data, int Size) {
         OVR_LOG_WITH_TAG("TextureLoader", "loading Texture");
 
         gli::texture Texture = gli::load((const char *) Data, Size);
         if (Texture.empty()) {
-            OVR_LOG_WITH_TAG("TextureLoader", "faild loading");
+            OVR_LOG_WITH_TAG("TextureLoader", "failed loading");
             return 0;
         }
         OVR_LOG_WITH_TAG("TextureLoader", "finished loading");
@@ -50,14 +50,13 @@ namespace TextureLoader {
         glm::tvec3<GLsizei> const Extent(Texture.extent());
         auto const FaceTotal = static_cast<GLsizei>(Texture.layers() * Texture.faces());
 
-        glTexStorage2D(Target, static_cast<GLint>(Texture.levels()), Format.Internal, Extent.x,
-                       Texture.target() == gli::TARGET_2D ? Extent.y : FaceTotal);
+        glTexStorage2D(Target, static_cast<GLint>(Texture.levels()), Format.Internal, Extent.x, Texture.target() == gli::TARGET_2D ? Extent.y : FaceTotal);
 
         for (std::size_t Layer = 0; Layer < Texture.layers(); ++Layer)
             for (std::size_t Face = 0; Face < Texture.faces(); ++Face)
                 for (std::size_t Level = 0; Level < Texture.levels(); ++Level) {
                     auto const LayerGL = static_cast<GLsizei>(Layer);
-                    glm::tvec3<GLsizei> Extent(Texture.extent(Level));
+                    glm::tvec3<GLsizei> LevelExtent(Texture.extent(Level));
                     Target = gli::is_target_cube(Texture.target()) ? static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + Face) : Target;
 
                     if (gli::is_compressed(Texture.format())) {
@@ -66,13 +65,13 @@ namespace TextureLoader {
                         if (Texture.target() == gli::TARGET_2D)
                             OVR_LOG_WITH_TAG("TextureLoader", "TARGET_2D");
 
-                        glCompressedTexSubImage2D(Target, static_cast<GLint>(Level), 0, 0, Extent.x,
-                                                  Texture.target() == gli::TARGET_1D_ARRAY ? LayerGL : Extent.y,
+                        glCompressedTexSubImage2D(Target, static_cast<GLint>(Level), 0, 0, LevelExtent.x,
+                                                  Texture.target() == gli::TARGET_1D_ARRAY ? LayerGL : LevelExtent.y,
                                                   Format.Internal, static_cast<GLsizei>(Texture.size(Level)),
                                                   Texture.data(Layer, Face, Level));
                     } else {
-                        glTexSubImage2D(Target, static_cast<GLint>(Level), 0, 0, Extent.x,
-                                        Texture.target() == gli::TARGET_1D_ARRAY ? LayerGL : Extent.y,
+                        glTexSubImage2D(Target, static_cast<GLint>(Level), 0, 0, LevelExtent.x,
+                                        Texture.target() == gli::TARGET_1D_ARRAY ? LayerGL : LevelExtent.y,
                                         Format.External, Format.Type, Texture.data(Layer, Face, Level));
                     }
                 }
@@ -80,11 +79,10 @@ namespace TextureLoader {
         return TextureName;
     }
 
-    GLuint Load(App *app, const char *path) {
-        static MemBufferT<uint8_t> buffer;
-
-        if (app->GetFileSys().ReadFile(path, buffer))
-            return Load_Texture(buffer, static_cast<int>(buffer.GetSize()));
+    GLuint Load(OVRFW::ovrFileSys *fileSys, const char *path) {
+        std::vector<uint8_t> buffer;
+        if (fileSys->ReadFile(path, buffer))
+            return Load_Texture(buffer.data(), buffer.size());
 
         return 0;
     }

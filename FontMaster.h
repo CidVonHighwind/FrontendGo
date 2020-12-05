@@ -1,14 +1,22 @@
-#ifndef FONT_MASTER
-#define FONT_MASTER
+#pragma once
 
 #include <glm/glm.hpp>
 #include <map>
 #include <string>
-#include "App.h"
+#include <FreeType/src/psaux/pstypes.h>
+#include "Appl.h"
 
-using namespace OVR;
+class FontManager {
+private:
+    OVRFW::GlProgram glProgram;
 
-namespace FontManager {
+    GLuint VAO;
+    GLuint VBO;
+
+    GLfloat vertices[6 * 100][4];
+
+public:
+    static FT_Library ft;
 
     struct Character {
         glm::fvec4 Position;  // the position of the character inside of the texture
@@ -26,15 +34,18 @@ namespace FontManager {
         std::map<GLchar, Character> Characters;
     };
 
-    void Init(int MenuWidth, int MenuHeight);
+    FontManager();
+    void Free();
 
-    void CloseFontLoader();
+    FontManager(FontManager&) = delete;
+    FontManager(FontManager&&) = delete;
 
-    int GetWidth(RenderFont font, std::string text);
+    FontManager &operator=(FontManager&) = delete;
+    FontManager &operator=(FontManager&&) = delete;
 
-    void LoadFont(RenderFont *font, const char *filePath, uint fontSize);
+    void Init(glm::mat4 projection);
 
-    void LoadFontFromAssets(App *app, RenderFont *font, const char *filePath, uint fontSize);
+    static void CloseFontLoader();
 
     void Begin();
 
@@ -42,8 +53,14 @@ namespace FontManager {
 
     void RenderFontTexture(FontManager::RenderFont font, ovrVector4f color, float transparency);
 
-    void Close();
+    void End();
 
-}  // namespace FontManager
+    static int GetWidth(RenderFont font, std::string text);
 
-#endif
+    static void LoadFont(RenderFont *font, const char *filePath, uint fontSize);
+
+    static void LoadFontFromAssets(OVRFW::ovrFileSys *fileSys, RenderFont *font, const char *filePath, uint fontSize);
+
+    static void LoadFont(RenderFont *font, FT_Face face, uint fontSize);
+
+};

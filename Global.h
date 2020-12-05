@@ -1,47 +1,49 @@
-#ifndef ANDROID_RESOURCES_H
-#define ANDROID_RESOURCES_H
+#pragma once
 
-#include "Menu.h"
+#include "Appl.h"
+#include "FontMaster.h"
 
-extern const std::string STR_HEADER, STR_VERSION;
-extern const float DisplayRefreshRate;
+class Global {
+public:
+    const ovrVector4f headerTextColor = {0.9f, 0.1f, 0.1f, 1.0f};
+    const ovrVector4f textSelectionColor = {0.9f, 0.1f, 0.1f, 1.0f};
+    const ovrVector4f textColor = {0.8f, 0.8f, 0.8f, 1.0f};
+    const ovrVector4f sliderColor = {0.8f, 0.8f, 0.8f, 0.8f};
+    const ovrVector4f MenuBackgroundColor = {0.2f, 0.2f, 0.2f, 0.95f};
+    const ovrVector4f MenuBackgroundOverlayHeader = {0.5f, 0.5f, 0.5f, 0.15f};
+    const ovrVector4f MenuBackgroundOverlayColorLight = {0.5f, 0.5f, 0.5f, 0.15f};
+    const ovrVector4f MenuBackgroundOverlayColor = {0.431f, 0.412f, 0.443f, 0.75f};
+    const ovrVector4f textColorBattery = {0.25f, 0.25f, 0.25f, 1.0f};
+    const ovrVector4f textColorVersion = {0.8f, 0.8f, 0.8f, 1.0f};
+    const ovrVector4f BatteryBackgroundColor = {0.25f, 0.25f, 0.25f, 1.0f};
+    const ovrVector4f MenuBottomColor = {0.25f, 0.25f, 0.25f, 1.0f};
 
-extern const int SAVE_FILE_VERSION;
+    FontManager::RenderFont fontHeader, fontBattery, fontTime, fontMenu, fontList, fontBottom, fontSlot, fontVersion, fontSmall;
 
-extern const int HEADER_HEIGHT, BOTTOM_HEIGHT, MENU_WIDTH, MENU_HEIGHT;
+    GLuint textureBackgroundId, textureHeaderIconId, textureGbIconId,
+            textureGbcIconId, textureVbIconId,
+            textureSaveIconId,
+            textureLoadIconId, textureWhiteId, textureResumeId, textureSettingsId, texuterLeftRightIconId,
+            textureUpDownIconId, textureResetIconId, textureSaveSlotIconId, textureLoadRomIconId,
+            textureBackIconId, textureMoveIconId, textureDistanceIconId, textureResetViewIconId,
+            textureScaleIconId, textureMappingIconId, texturePaletteIconId, textureButtonAIconId,
+            textureButtonBIconId, textureButtonXIconId, textureButtonYIconId, textureFollowHeadIconId,
+            textureDMGIconId, textureExitIconId, threedeeIconId, twodeeIconId, mappingLeftDownId, textureIpdIconId,
+            mappingLeftUpId, mappingLeftLeftId, mappingLeftRightId, mappingRightDownId, mappingRightUpId,
+            mappingRightLeftId, mappingRightRightId, mappingStartId, mappingSelectId, mappingTriggerLeft, mappingTriggerRight;
 
-extern int menuItemSize, saveSlot;
-extern bool menuOpen, loadedRom, followHead;
-extern bool SwappSelectBackButton;
+    std::string appStoragePath;
+    std::string saveFilePath;
+    std::string romFolderPath;
 
-extern uint SelectButton, BackButton;
-extern Menu *currentMenu;
+    int menuItemSize;
+    int saveSlot;
 
-extern ovrVector4f sliderColor, textColorVersion, headerTextColor, MenuBackgroundColor,
-        MenuBackgroundOverlayColor, MenuBackgroundOverlayColorLight, MenuBackgroundOverlayHeader,
-        BatteryBackgroundColor, textColor, textSelectionColor, MenuBottomColor, textColorBattery;
+    bool SwappSelectBackButton;
+    bool menuOpen;
+    bool followHead;
 
-extern std::string appStoragePath, saveFilePath, romFolderPath;
+    void Init(OVRFW::ovrFileSys *fileSys);
 
-extern FontManager::RenderFont fontHeader, fontBattery, fontTime, fontMenu, fontList, fontBottom,
-        fontSlot, fontVersion, fontSmall;
-
-extern GLuint textureBackgroundId, textureIdMenu, textureHeaderIconId, textureGbIconId,
-        textureGbcIconId, textureVbIconId, textureIpdIconId,
-        textureSaveIconId,
-        textureLoadIconId, textureWhiteId, textureResumeId, textureSettingsId, texuterLeftRightIconId,
-        textureUpDownIconId, textureResetIconId, textureSaveSlotIconId, textureLoadRomIconId,
-        textureBackIconId, textureMoveIconId, textureDistanceIconId, textureResetViewIconId,
-        textureScaleIconId, textureMappingIconId, texturePaletteIconId, textureButtonAIconId,
-        textureButtonBIconId, textureButtonXIconId, textureButtonYIconId, textureFollowHeadIconId,
-        textureDMGIconId, textureExitIconId, threedeeIconId, twodeeIconId, mappingLeftDownId, mappingLeftUpId, mappingLeftLeftId, mappingLeftRightId,
-        mappingRightDownId, mappingRightUpId, mappingRightLeftId, mappingRightRightId, mappingStartId, mappingSelectId, mappingTriggerLeft, mappingTriggerRight;
-
-extern const ovrJava *java;
-extern jclass clsData;
-
-void SaveSettings();
-
-void ResetMenuState();
-
-#endif //ANDROID_RESOURCES_H
+    void Free();
+};

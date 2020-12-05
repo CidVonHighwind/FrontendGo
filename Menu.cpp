@@ -2,17 +2,17 @@
 #include <sstream>
 #include <dirent.h>
 #include <fstream>
-#include <VrApi/Include/VrApi_Input.h>
-#include <VrAppSupport/VrGUI/Src/VRMenuObject.h>
-#include <VrAppSupport/VrGUI/Src/VRMenu.h>
+#include <OVR_LogUtils.h>
+#include <VrApi_SystemUtils.h>
+#include <VirtualBoyGo/Src/main.h>
 
+#include "drawHelper.h"
+#include "layerBuilder.h"
+#include "emulator.h"
 #include "Audio/OpenSLWrap.h"
-#include "DrawHelper.h"
 #include "FontMaster.h"
-#include "LayerBuilder.h"
 #include "TextureLoader.h"
 #include "MenuHelper.h"
-#include "Emulator.h"
 #include "Global.h"
 #include "ButtonMapping.h"
 
@@ -27,293 +27,569 @@
 #define MIN_DISTANCE 0.5f
 #define MAX_DISTANCE 10.0f
 
-using namespace MenuGo;
-using namespace OVR;
+using namespace OVRFW;
 
-int batteryColorCount = 5;
-ovrVector4f BatteryColors[] = {{0.745F, 0.114F, 0.176F, 1.0F},
-                               {0.92F,  0.361F, 0.176F, 1.0F},
-                               {0.976F, 0.69F,  0.255F, 1.0F},
-                               {0.545F, 0.769F, 0.247F, 1.0F},
-                               {0.545F, 0.769F, 0.247F, 1.0F},
-                               {0.0F,   0.78F,  0.078F, 1.0F},
-                               {0.0F,   0.78F,  0.078F, 1.0F}};
+const int batteryColorCount = 5;
+const ovrVector4f BatteryColors[] = {{0.745F, 0.114F, 0.176F, 1.0F},
+                                     {0.92F,  0.361F, 0.176F, 1.0F},
+                                     {0.976F, 0.69F,  0.255F, 1.0F},
+                                     {0.545F, 0.769F, 0.247F, 1.0F},
+                                     {0.545F, 0.769F, 0.247F, 1.0F},
+                                     {0.0F,   0.78F,  0.078F, 1.0F},
+                                     {0.0F,   0.78F,  0.078F, 1.0F}};
 
-// saved variables
-bool showExitDialog = false;
-bool resetView = false;
-bool SwappSelectBackButton = false;
-
-float transitionPercentage = 1.0F;
-
-uint buttonStatesReal[3];
-uint buttonStates[3];
-uint lastButtonStates[3];
-
-MappedButtons buttonMappingMenu;
-MappedButton *remapButton;
-
-// gamepad button names; ltouch button names; rtouch button names
-std::string MapButtonStr[] = {"A", "B", "RThumb", "RBumper",
-                              "X", "Y", "LThumb", "LBumper",
-                              "Up", "Down", "Left", "Right",
-                              "Enter", "Back", "GripTrigger", "Trigger", "Joystick",
-                              "LStick-Up", "LStick-Down", "LStick-Left", "LStick-Right",
-                              "RStick-Up", "RStick-Down", "RStick-Left", "RStick-Right",
-                              "LTrigger", "RTrigger", "", "", "", "", "",
-
-                              "LTouch-A", "LTouch-B", "LTouch-RThumb", "LTouch-RShoulder",
-                              "LTouch-X", "LTouch-Y", "LTouch-LThumb", "LTouch-LShoulder",
-                              "LTouch-Up", "LTouch-Down", "LTouch-Left", "LTouch-Right",
-                              "LTouch-Enter", "LTouch-Back", "LTouch-GripTrigger", "LTouch-Trigger",
-                              "LTouch-Joystick",
-                              "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-
-                              "RTouch-A", "RTouch-B", "RTouch-RThumb", "RTouch-RShoulder",
-                              "RTouch-X", "RTouch-Y", "RTouch-LThumb", "RTouch-LShoulder",
-                              "RTouch-Up", "RTouch-Down", "RTouch-Left", "RTouch-Right",
-                              "RTouch-Enter", "RTouch-Back", "RTouch-GripTrigger", "RTouch-Trigger",
-                              "RTouch-Joystick",
-                              "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
-
-std::string strMove[] = {"Follow Head: Yes", "Follow Head: No"};
-
-int batteryLevel, batter_string_width, time_string_width;
-std::string time_string, battery_string;
-
-bool UpdateMapping = false;
-bool UpdateMappingUseTimer = false;
-
-float UpdateMappingTimer;
-float MappingOverlayPercentage;
-
-ovrTextureSwapChain *MenuSwapChain;
-GLuint MenuFrameBuffer = 0;
-
-bool isTransitioning;
-int transitionMoveDir = 1;
-float transitionState = 1;
-
-void (*updateMappingText)() = nullptr;
-
-Menu *nextMenu, *currentBottomBar;
-Menu romSelectionMenu, mainMenu, settingsMenu, buttonMenuMapMenu, buttonEmulatorMapMenu, bottomBar,
-        buttonMappingOverlay, moveMenu;
-
-MenuButton *mappedButton;
-MenuButton *backHelp, *menuHelp, *selectHelp;
-MenuButton *yawButton, *pitchButton, *rollButton, *scaleButton, *distanceButton;
-MenuButton *slotButton;
-std::vector<MenuButton> buttonMapping;
-
-MenuLabel *mappingButtonLabel, *possibleMappingLabel;
-
-Menu *currentMenu;
-
-const int MENU_WIDTH = 640;
-const int MENU_HEIGHT = 576;
-const int HEADER_HEIGHT = 75;
-const int BOTTOM_HEIGHT = 30;
-
-int menuItemSize;
-int saveSlot = 0;
-
-bool menuOpen = true;
-bool loadedRom = false;
-bool followHead = false;
-
-float deltaSeconds;
-
-ovrMatrix4f CenterEyeViewMatrix;
-
-jmethodID getVal;
+const std::string strMove[] = {"Follow Head: Yes", "Follow Head: No"};
 
 template<typename T>
-std::string to_string(T value) {
+static std::string ToString(T value) {
     std::ostringstream os;
     os << value;
     return os.str();
 }
 
-void StartTransition(Menu *next, int dir) {
+void MenuGo::Free() {
+    vrapi_DestroyTextureSwapChain(MenuSwapChain);
+}
+
+void MenuGo::Init(Emulator *_emulator, LayerBuilder *_layerBuilder, DrawHelper *_drawHelper, FontManager *_fontManager,
+                  const ovrJava *_java, jclass *_clsData) {
+    emulator = _emulator;
+    layerBuilder = _layerBuilder;
+    drawHelper = _drawHelper;
+    fontManager = _fontManager;
+
+    emulator->OnRomLoaded = std::bind(&MenuGo::ResetMenuState, this);
+
+    java = _java;
+    clsData = _clsData;
+    getVal = java->Env->GetMethodID(*clsData, "GetBatteryLevel", "()I");
+}
+
+void MenuGo::SetUpMenu() {
+    OVR_LOG_WITH_TAG("Menu", "Set up Menu");
+    int bigGap = 10;
+    int smallGap = 5;
+
+    OVR_LOG_WITH_TAG("Menu", "got emulator");
+
+    ovrVirtualBoyGo::global.menuItemSize = (ovrVirtualBoyGo::global.fontMenu.FontSize + 4);
+
+    {
+        OVR_LOG_WITH_TAG("Menu", "Set up rom selection menu");
+        emulator->InitRomSelectionMenu(0, 0, romSelectionMenu);
+
+        romSelectionMenu.CurrentSelection = 0;
+
+        romSelectionMenu.BackPress = std::bind(&MenuGo::OnBackPressedRomList, this);
+        romSelectionMenu.Init();
+    }
+
+    {
+        OVR_LOG_WITH_TAG("Menu", "Set up bottom bar");
+        // TODO: now that the menu button can be mapped to ever button not so sure what to do with this
+//        menuHelp = new MenuButton(&fontBottom, buttonMappingMenu.Buttons[0].Button == EmuButton_X ? textureButtonXIconId : textureButtonYIconId,
+//                                  "Close Menu", 7, MENU_HEIGHT - BOTTOM_HEIGHT, 0, BOTTOM_HEIGHT, nullptr, nullptr, nullptr);
+//        menuHelp->Color = MenuBottomColor;
+//        bottomBar.MenuItems.push_back(menuHelp);
+
+        backHelp = std::make_unique<MenuButton>(&ovrVirtualBoyGo::global.fontBottom,
+                                                ovrVirtualBoyGo::global.SwappSelectBackButton ? ovrVirtualBoyGo::global.textureButtonAIconId
+                                                                                              : ovrVirtualBoyGo::global.textureButtonBIconId,
+                                                "Back", emulator->MENU_WIDTH - 210, emulator->MENU_HEIGHT - emulator->BOTTOM_HEIGHT, 0, emulator->BOTTOM_HEIGHT,
+                                                nullptr, nullptr, nullptr);
+        backHelp->Color = ovrVirtualBoyGo::global.MenuBottomColor;
+        bottomBar.MenuItems.push_back(backHelp);
+
+        selectHelp = std::make_unique<MenuButton>(&ovrVirtualBoyGo::global.fontBottom,
+                                                  ovrVirtualBoyGo::global.SwappSelectBackButton ? ovrVirtualBoyGo::global.textureButtonBIconId
+                                                                                                : ovrVirtualBoyGo::global.textureButtonAIconId,
+                                                  "Select", emulator->MENU_WIDTH - 110, emulator->MENU_HEIGHT - emulator->BOTTOM_HEIGHT, 0,
+                                                  emulator->BOTTOM_HEIGHT, nullptr,
+                                                  nullptr, nullptr);
+        selectHelp->Color = ovrVirtualBoyGo::global.MenuBottomColor;
+        bottomBar.MenuItems.push_back(selectHelp);
+
+        currentBottomBar = &bottomBar;
+    }
+
+    int posX = 20;
+    int posY = emulator->HEADER_HEIGHT + 20;
+
+    using namespace std::placeholders;
+
+    // -- main menu page --
+    auto buttonResumeGame = std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureResumeId,
+                                                         "Resume Game",
+                                                         posX, posY, std::bind(&MenuGo::OnClickResumGame, this, _1), nullptr, nullptr);
+    mainMenu.MenuItems.push_back(buttonResumeGame);
+
+    auto buttonResetGame = std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureResetIconId,
+                                                        "Reset Game", posX,
+                                                        posY += ovrVirtualBoyGo::global.menuItemSize,
+                                                        std::bind(&MenuGo::OnClickResetGame, this, _1), nullptr, nullptr);
+    mainMenu.MenuItems.push_back(buttonResetGame);
+    slotButton = std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureSaveSlotIconId, "", posX,
+                                              posY += ovrVirtualBoyGo::global.menuItemSize + 10,
+                                              std::bind(&MenuGo::OnClickSaveSlotRight, this, _1),
+                                              std::bind(&MenuGo::OnClickSaveSlotLeft, this, _1),
+                                              std::bind(&MenuGo::OnClickSaveSlotRight, this, _1));
+    slotButton->ScrollTimeH = 0.1;
+    ChangeSaveSlot(slotButton.get(), 0);
+    mainMenu.MenuItems.push_back(slotButton);
+
+    OVR_LOG_WITH_TAG("Menu", "Set up Main Menu");
+    emulator->InitMainMenu(posX, posY, mainMenu);
+
+
+    OVR_LOG_WITH_TAG("Menu", "Set up Main Menu3");
+    mainMenu.MenuItems.push_back(std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureSaveIconId, "Save",
+                                                              posX, posY += ovrVirtualBoyGo::global.menuItemSize,
+                                                              std::bind(&MenuGo::OnClickSaveGame, this, _1), nullptr, nullptr));
+    mainMenu.MenuItems.push_back(std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureLoadIconId, "Load",
+                                                              posX, posY += ovrVirtualBoyGo::global.menuItemSize,
+                                                              std::bind(&MenuGo::OnClickLoadGame, this, _1), nullptr, nullptr));
+    mainMenu.MenuItems.push_back(std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureLoadRomIconId, "Load Rom", posX,
+                                                              posY += ovrVirtualBoyGo::global.menuItemSize + 10,
+                                                              std::bind(&MenuGo::OnClickLoadRomGame, this, _1), nullptr, nullptr));
+    mainMenu.MenuItems.push_back(std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureResetViewIconId,
+                                                              "Reset View", posX, posY += ovrVirtualBoyGo::global.menuItemSize,
+                                                              std::bind(&MenuGo::OnClickResetView, this, _1), nullptr, nullptr));
+    mainMenu.MenuItems.push_back(std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureSettingsId,
+                                                              "Settings", posX,
+                                                              posY += ovrVirtualBoyGo::global.menuItemSize,
+                                                              std::bind(&MenuGo::OnClickSettingsGame, this, _1), nullptr, nullptr));
+    mainMenu.MenuItems.push_back(std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureExitIconId, "Exit",
+                                                              posX, posY += ovrVirtualBoyGo::global.menuItemSize + 10,
+                                                              std::bind(&MenuGo::OnClickExit, this, _1), nullptr, nullptr));
+
+    mainMenu.Init();
+    OVR_LOG_WITH_TAG("Menu", "Set up Main Menu2");
+    mainMenu.BackPress = std::bind(&MenuGo::OnClickBackMainMenu, this);
+
+    // -- settings page --
+    OVR_LOG_WITH_TAG("Menu", "Set up Settings Menu");
+
+    posY = emulator->HEADER_HEIGHT + 20;
+
+    buttonSettingsMenuMapping = std::make_unique<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureMappingIconId,
+                                                             "Menu Button Mapping",
+                                                             posX, posY,
+                                                             std::bind(&MenuGo::OnClickMenuMappingScreen, this, _1), nullptr, nullptr);
+    buttonSettingsEmulatorMapping = std::make_unique<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureMappingIconId,
+                                                                 "Emulator Button Mapping",
+                                                                 posX, posY += ovrVirtualBoyGo::global.menuItemSize,
+                                                                 std::bind(&MenuGo::OnClickEmulatorMappingScreen, this, _1), nullptr, nullptr);
+    buttonSettingsMoveScreen = std::make_unique<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureMoveIconId, "Move Screen", posX,
+                                                            posY += ovrVirtualBoyGo::global.menuItemSize,
+                                                            std::bind(&MenuGo::OnClickMoveScreen, this, _1), nullptr, nullptr);
+    buttonSettingsFollowHead = std::make_unique<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureFollowHeadIconId,
+                                                            strMove[ovrVirtualBoyGo::global.followHead ? 0 : 1], posX,
+                                                            posY += ovrVirtualBoyGo::global.menuItemSize + bigGap,
+                                                            std::bind(&MenuGo::OnClickFollowMode, this, _1),
+                                                            std::bind(&MenuGo::OnClickFollowMode, this, _1),
+                                                            std::bind(&MenuGo::OnClickFollowMode, this, _1));
+
+    settingsMenu.MenuItems.push_back(buttonSettingsMenuMapping);
+    settingsMenu.MenuItems.push_back(buttonSettingsEmulatorMapping);
+    settingsMenu.MenuItems.push_back(buttonSettingsMoveScreen);
+    settingsMenu.MenuItems.push_back(buttonSettingsFollowHead);
+
+    emulator->InitSettingsMenu(posX, posY, settingsMenu);
+
+    settingsMenu.MenuItems.push_back(
+            std::make_unique<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureBackIconId, "Save and Back", posX,
+                                         posY += ovrVirtualBoyGo::global.menuItemSize + bigGap,
+                                         std::bind(&MenuGo::OnClickBackAndSave, this, _1), nullptr, nullptr));
+
+    // version number at the bottom
+    settingsMenu.MenuItems.push_back(
+            std::make_unique<MenuLabel>(&ovrVirtualBoyGo::global.fontVersion, emulator->STR_VERSION, emulator->MENU_WIDTH - 70,
+                                        emulator->MENU_HEIGHT - emulator->BOTTOM_HEIGHT - 50 + 10, 70, 50, ovrVirtualBoyGo::global.textColorVersion));
+
+    settingsMenu.BackPress = std::bind(&MenuGo::OnBackPressedSettings, this);
+    settingsMenu.Init();
+
+    // -- menu button mapping --
+    posY = emulator->HEADER_HEIGHT + 20;
+
+    auto swapButton = std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureLoadRomIconId, "", posX, posY,
+                                                   std::bind(&MenuGo::SwapButtonSelectBack, this, _1),
+                                                   std::bind(&MenuGo::SwapButtonSelectBack, this, _1),
+                                                   std::bind(&MenuGo::SwapButtonSelectBack, this, _1));
+    swapButton->UpdateFunction = std::bind(&MenuGo::UpdateButtonMapping, this, _1, _2, _3);
+    buttonMenuMapMenu.MenuItems.push_back(swapButton);
+
+    posY += ovrVirtualBoyGo::global.menuItemSize;
+
+    // buttons
+    auto menuMappingButton = std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureLoadRomIconId, "menu mapped to:",
+                                                          posX,
+                                                          posY,
+                                                          nullptr, nullptr, nullptr);
+    menuMappingButton->Selectable = false;
+    buttonMenuMapMenu.MenuItems.push_back(menuMappingButton);
+
+    // first button
+    auto menuMappingButton0 = std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, 0, "", 250, posY,
+                                                           (emulator->MENU_WIDTH - 250 - 20) / 2, ovrVirtualBoyGo::global.menuItemSize,
+                                                           std::bind(&MenuGo::OnClickChangeMenuButtonEnter, this, _1), nullptr,
+                                                           std::bind(&MenuGo::OnClickMenuMappingButtonRight, this, _1));
+    menuMappingButton0->Tag = 0;
+    SetMappingText(menuMappingButton0.get(), &buttonMappingMenu.Buttons[0]);
+    buttonMenuMapMenu.MenuItems.push_back(menuMappingButton0);
+
+    // second button
+    auto menuMappingButton1 = std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, 0, "",
+                                                           250 + (emulator->MENU_WIDTH - 250 - 20) / 2, posY,
+                                                           (emulator->MENU_WIDTH - 250 - 20) / 2, ovrVirtualBoyGo::global.menuItemSize,
+                                                           std::bind(&MenuGo::OnClickChangeMenuButtonEnter, this, _1),
+                                                           std::bind(&MenuGo::OnClickMenuMappingButtonLeft, this, _1), nullptr);
+    menuMappingButton1->Tag = 1;
+    SetMappingText(menuMappingButton1.get(), &buttonMappingMenu.Buttons[1]);
+    menuMappingButton1->OnSelectFunction = std::bind(&MenuGo::OnMenuMappingButtonSelect, this, _1, _2);
+    buttonMenuMapMenu.MenuItems.push_back(menuMappingButton1);
+
+    SwapButtonSelectBack(swapButton.get());
+    SwapButtonSelectBack(swapButton.get());
+
+    buttonMenuMapMenu.MenuItems.push_back(
+            std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureBackIconId, "Back", posX,
+                                         posY += ovrVirtualBoyGo::global.menuItemSize + bigGap,
+                                         std::bind(&MenuGo::OnClickBackMove, this, _1), nullptr, nullptr));
+    buttonMenuMapMenu.BackPress = std::bind(&MenuGo::OnBackPressedMove, this);
+    buttonMenuMapMenu.Init();
+
+
+    // -- emulator button mapping --
+    posY = emulator->HEADER_HEIGHT + 10;
+
+    for (int i = 0; i < emulator->buttonCount; ++i) {
+        OVR_LOG_WITH_TAG("Menu", "Set up mapping for %i", i);
+
+//            MenuLabel *newButtonLabel = new MenuLabel(&fontMenu, "A Button",
+//                                                      posX, posY, 150, menuItemSize,
+//                                                      {0.9f, 0.9f, 0.9f, 0.9f});
+
+        // image of the button
+        auto newButtonImage = std::make_shared<MenuImage>(*emulator->button_icons[emulator->buttonOrder[i]],
+                                                          80 / 2 - ovrVirtualBoyGo::global.menuItemSize / 2, posY, ovrVirtualBoyGo::global.menuItemSize,
+                                                          ovrVirtualBoyGo::global.menuItemSize, ovrVector4f{0.9F, 0.9F, 0.9F, 0.9F});
+        buttonEmulatorMapMenu.MenuItems.push_back(newButtonImage);
+
+        int mappingButtonWidth = (emulator->MENU_WIDTH - 80 - 20) / 2;
+
+        auto newButtonLeft = std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, 0, "abc", 80, posY, mappingButtonWidth,
+                                                          ovrVirtualBoyGo::global.menuItemSize,
+                                                          std::bind(&MenuGo::OnClickChangeButtonMappingEnter, this, _1), nullptr,
+                                                          std::bind(&MenuGo::OnClickMappingButtonRight, this, _1));
+
+        // left button
+        // @hack: this is only done because the menu currently only really supports lists
+        if (i != 0)
+            newButtonLeft->OnSelectFunction = std::bind(&MenuGo::OnMappingButtonSelect, this, _1, _2);
+        newButtonLeft->Tag = i;
+        newButtonLeft->Tag2 = 0;
+        UpdateButtonMappingText(newButtonLeft.get());
+        if (i == 0)
+            newButtonLeft->UpdateFunction = std::bind(&MenuGo::UpdateButtonMapping, this, _1, _2, _3);
+
+        // right button
+        auto newButtonRight = std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, 0, "abc", 80 + mappingButtonWidth, posY, mappingButtonWidth,
+                                                           ovrVirtualBoyGo::global.menuItemSize,
+                                                           std::bind(&MenuGo::OnClickChangeButtonMappingEnter, this, _1),
+                                                           std::bind(&MenuGo::OnClickMappingButtonLeft, this, _1), nullptr);
+        // @hack: this is only done because the menu currently only really supports lists
+        newButtonRight->OnSelectFunction = std::bind(&MenuGo::OnMappingButtonSelect, this, _1, _2);
+        newButtonRight->Tag = i;
+        newButtonRight->Tag2 = 1;
+        UpdateButtonMappingText(newButtonRight.get());
+
+        buttonMapping.push_back(newButtonLeft);
+        buttonMapping.push_back(newButtonRight);
+
+        posY += ovrVirtualBoyGo::global.menuItemSize;
+    }
+
+    // select the first element
+    buttonEmulatorMapMenu.CurrentSelection = (int) buttonEmulatorMapMenu.MenuItems.size();
+
+    // button mapping page
+    for (int i = 0; i < emulator->buttonCount * 2; ++i)
+        buttonEmulatorMapMenu.MenuItems.push_back(buttonMapping.at(i));
+
+    buttonEmulatorMapMenu.MenuItems.push_back(
+            std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureResetViewIconId, "Reset Mapping", posX,
+                                         posY += bigGap,
+                                         std::bind(&MenuGo::OnClickResetEmulatorMapping, this, _1), nullptr, nullptr));
+    buttonEmulatorMapMenu.MenuItems.push_back(
+            std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureBackIconId, "Back", posX,
+                                         posY += ovrVirtualBoyGo::global.menuItemSize - 3, std::bind(&MenuGo::OnClickBackMove, this, _1), nullptr, nullptr));
+    buttonEmulatorMapMenu.BackPress = std::bind(&MenuGo::OnBackPressedMove, this);
+    buttonEmulatorMapMenu.Init();
+
+
+    // -- button mapping overlay --
+    buttonMappingOverlay.MenuItems.push_back(
+            std::make_shared<MenuImage>(ovrVirtualBoyGo::global.textureWhiteId, 0, 0, emulator->MENU_WIDTH, emulator->MENU_HEIGHT,
+                                        ovrVector4f{0.0F, 0.0F, 0.0F, 0.8F}));
+    int overlayWidth = 250;
+    int overlayHeight = 80;
+    int margin = 15;
+    buttonMappingOverlay.MenuItems.push_back(
+            std::make_shared<MenuImage>(ovrVirtualBoyGo::global.textureWhiteId, emulator->MENU_WIDTH / 2 - overlayWidth / 2,
+                                        emulator->MENU_HEIGHT / 2 - overlayHeight / 2 - margin, overlayWidth,
+                                        overlayHeight + margin * 2, ovrVector4f{0.05F, 0.05F, 0.05F, 0.3F}));
+
+    mappingButtonLabel = std::make_unique<MenuLabel>(&ovrVirtualBoyGo::global.fontMenu, "A Button", emulator->MENU_WIDTH / 2 - overlayWidth / 2,
+                                                     emulator->MENU_HEIGHT / 2 - overlayHeight / 2, overlayWidth, overlayHeight / 3,
+                                                     ovrVector4f{0.9F, 0.9F, 0.9F, 0.9F});
+    possibleMappingLabel = std::make_unique<MenuLabel>(&ovrVirtualBoyGo::global.fontMenu, "(A, B, X, Y)", emulator->MENU_WIDTH / 2 - overlayWidth / 2,
+                                                       emulator->MENU_HEIGHT / 2 + overlayHeight / 2 - overlayHeight / 3, overlayWidth, overlayHeight / 3,
+                                                       ovrVector4f{0.9F, 0.9F, 0.9F, 0.9F});
+    pressButtonLabel = std::make_unique<MenuLabel>(&ovrVirtualBoyGo::global.fontMenu, "Press Button", emulator->MENU_WIDTH / 2 - overlayWidth / 2,
+                                                   emulator->MENU_HEIGHT / 2 - overlayHeight / 2 + overlayHeight / 3,
+                                                   overlayWidth, overlayHeight / 3, ovrVector4f{0.9F, 0.9F, 0.9F, 0.9F});
+
+    buttonMappingOverlay.MenuItems.push_back(mappingButtonLabel);
+    buttonMappingOverlay.MenuItems.push_back(pressButtonLabel);
+    buttonMappingOverlay.MenuItems.push_back(possibleMappingLabel);
+
+    // -- move menu page --
+    posY = emulator->HEADER_HEIGHT + 20;
+    yawButton = std::make_unique<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.texuterLeftRightIconId, "", posX, posY,
+                                             std::bind(&MenuGo::OnClickYaw, this, _1),
+                                             std::bind(&MenuGo::OnClickMoveScreenYawLeft, this, _1),
+                                             std::bind(&MenuGo::OnClickMoveScreenYawRight, this, _1));
+    yawButton->ScrollTimeH = 0.025;
+    pitchButton = std::make_unique<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureUpDownIconId, "", posX,
+                                               posY += ovrVirtualBoyGo::global.menuItemSize,
+                                               std::bind(&MenuGo::OnClickPitch, this, _1),
+                                               std::bind(&MenuGo::OnClickMoveScreenPitchLeft, this, _1),
+                                               std::bind(&MenuGo::OnClickMoveScreenPitchRight, this, _1));
+    pitchButton->ScrollTimeH = 0.025;
+    rollButton = std::make_unique<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureResetIconId, "", posX,
+                                              posY += ovrVirtualBoyGo::global.menuItemSize,
+                                              std::bind(&MenuGo::OnClickRoll, this, _1),
+                                              std::bind(&MenuGo::OnClickMoveScreenRollLeft, this, _1),
+                                              std::bind(&MenuGo::OnClickMoveScreenRollRight, this, _1));
+    rollButton->ScrollTimeH = 0.025;
+    distanceButton = std::make_unique<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureDistanceIconId, "", posX,
+                                                  posY += ovrVirtualBoyGo::global.menuItemSize,
+                                                  std::bind(&MenuGo::OnClickDistance, this, _1),
+                                                  std::bind(&MenuGo::OnClickMoveScreenDistanceLeft, this, _1),
+                                                  std::bind(&MenuGo::OnClickMoveScreenDistanceRight, this, _1));
+    distanceButton->ScrollTimeH = 0.025;
+    scaleButton = std::make_unique<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureScaleIconId, "", posX,
+                                               posY += ovrVirtualBoyGo::global.menuItemSize,
+                                               std::bind(&MenuGo::OnClickScale, this, _1),
+                                               std::bind(&MenuGo::OnClickMoveScreenScaleLeft, this, _1),
+                                               std::bind(&MenuGo::OnClickMoveScreenScaleRight, this, _1));
+    scaleButton->ScrollTimeH = 0.025;
+
+    moveMenu.MenuItems.push_back(yawButton);
+    moveMenu.MenuItems.push_back(pitchButton);
+    moveMenu.MenuItems.push_back(rollButton);
+    moveMenu.MenuItems.push_back(distanceButton);
+    moveMenu.MenuItems.push_back(scaleButton);
+
+    moveMenu.MenuItems.push_back(
+            std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureResetViewIconId, "Reset View", posX,
+                                         posY += ovrVirtualBoyGo::global.menuItemSize + smallGap,
+                                         std::bind(&MenuGo::OnClickResetViewSettings, this, _1), nullptr, nullptr));
+    moveMenu.MenuItems.push_back(std::make_shared<MenuButton>(&ovrVirtualBoyGo::global.fontMenu, ovrVirtualBoyGo::global.textureBackIconId, "Back", posX,
+                                                              posY += ovrVirtualBoyGo::global.menuItemSize + bigGap,
+                                                              std::bind(&MenuGo::OnClickBackMove, this, _1), nullptr, nullptr));
+
+    moveMenu.BackPress = std::bind(&MenuGo::OnBackPressedMove, this);
+    moveMenu.Init();
+
+    currentMenu = &romSelectionMenu;
+
+    // updates the visible values
+    MoveYaw(yawButton.get(), 0);
+    MovePitch(pitchButton.get(), 0);
+    MoveRoll(rollButton.get(), 0);
+    ChangeDistance(distanceButton.get(), 0);
+    ChangeScale(scaleButton.get(), 0);
+}
+
+void MenuGo::StartTransition(Menu *next, int dir) {
     if (isTransitioning) return;
     isTransitioning = true;
     transitionMoveDir = dir;
     nextMenu = next;
 }
 
-void OnClickResumGame(MenuItem *item) {
+void MenuGo::OnClickResumGame(MenuItem *item) {
     OVR_LOG_WITH_TAG("Menu", "Pressed RESUME GAME");
-    if (loadedRom) menuOpen = false;
+    if (loadedRom) ovrVirtualBoyGo::global.menuOpen = false;
 }
 
-void OnClickResetGame(MenuItem *item) {
+void MenuGo::OnClickResetGame(MenuItem *item) {
     OVR_LOG_WITH_TAG("Menu", "RESET GAME");
     if (loadedRom) {
-        Emulator::ResetGame();
-        menuOpen = false;
+        emulator->ResetGame();
+        ovrVirtualBoyGo::global.menuOpen = false;
     }
 }
 
-void OnClickSaveGame(MenuItem *item) {
+void MenuGo::OnClickSaveGame(MenuItem *item) {
     OVR_LOG_WITH_TAG("Menu", "on click save game");
     if (loadedRom) {
-        Emulator::SaveState(saveSlot);
-        menuOpen = false;
+        emulator->SaveState(ovrVirtualBoyGo::global.saveSlot);
+        ovrVirtualBoyGo::global.menuOpen = false;
     }
 }
 
-void OnClickLoadGame(MenuItem *item) {
+void MenuGo::OnClickLoadGame(MenuItem *item) {
     if (loadedRom) {
-        Emulator::LoadState(saveSlot);
-        menuOpen = false;
+        emulator->LoadState(ovrVirtualBoyGo::global.saveSlot);
+        ovrVirtualBoyGo::global.menuOpen = false;
     }
 }
 
-void OnClickLoadRomGame(MenuItem *item) { StartTransition(&romSelectionMenu, -1); }
+void MenuGo::OnClickLoadRomGame(MenuItem *item) { StartTransition(&romSelectionMenu, -1); }
 
-void OnClickSettingsGame(MenuItem *item) { StartTransition(&settingsMenu, 1); }
+void MenuGo::OnClickSettingsGame(MenuItem *item) { StartTransition(&settingsMenu, 1); }
 
-void OnClickResetView(MenuItem *item) { resetView = true; }
+void MenuGo::OnClickResetView(MenuItem *item) { resetView = true; }
 
-void OnClickBackAndSave(MenuItem *item) {
+void MenuGo::OnClickBackAndSave(MenuItem *item) {
     StartTransition(&mainMenu, -1);
-    SaveSettings();
+    MenuGo::SaveSettings();
 }
 
-void OnBackPressedRomList() { StartTransition(&mainMenu, 1); }
+void MenuGo::OnBackPressedRomList() { StartTransition(&mainMenu, 1); }
 
-void OnBackPressedSettings() {
+void MenuGo::OnBackPressedSettings() {
     StartTransition(&mainMenu, -1);
-    SaveSettings();
+    MenuGo::SaveSettings();
 }
 
-void OnClickBackMove(MenuItem *item) {
+void MenuGo::OnClickBackMove(MenuItem *item) {
     StartTransition(&settingsMenu, -1);
 }
 
-void ChangeSaveSlot(MenuItem *item, int dir) {
-    saveSlot += dir;
-    if (saveSlot < 0)
-        saveSlot = MAX_SAVE_SLOTS - 1;
-    if (saveSlot >= MAX_SAVE_SLOTS)
-        saveSlot = 0;
+void MenuGo::ChangeSaveSlot(MenuItem *item, int dir) {
+    ovrVirtualBoyGo::global.saveSlot += dir;
+    if (ovrVirtualBoyGo::global.saveSlot < 0)
+        ovrVirtualBoyGo::global.saveSlot = MAX_SAVE_SLOTS - 1;
+    if (ovrVirtualBoyGo::global.saveSlot >= MAX_SAVE_SLOTS)
+        ovrVirtualBoyGo::global.saveSlot = 0;
 
-    Emulator::UpdateStateImage(saveSlot);
-    ((MenuButton *) item)->Text = "Save Slot: " + to_string(saveSlot);
+    emulator->UpdateStateImage(ovrVirtualBoyGo::global.saveSlot);
+    ((MenuButton *) item)->Text = "Save Slot: " + ToString(ovrVirtualBoyGo::global.saveSlot);
 }
 
-void OnClickSaveSlotLeft(MenuItem *item) {
+void MenuGo::OnClickSaveSlotLeft(MenuItem *item) {
     ChangeSaveSlot(item, -1);
-    SaveSettings();
+    MenuGo::SaveSettings();
 }
 
-void OnClickSaveSlotRight(MenuItem *item) {
+void MenuGo::OnClickSaveSlotRight(MenuItem *item) {
     ChangeSaveSlot(item, 1);
     SaveSettings();
 }
 
-void SwapButtonSelectBack(MenuItem *item) {
-    SwappSelectBackButton = !SwappSelectBackButton;
+void MenuGo::SwapButtonSelectBack(MenuItem *item) {
+    ovrVirtualBoyGo::global.SwappSelectBackButton = !ovrVirtualBoyGo::global.SwappSelectBackButton;
     ((MenuButton *) item)->Text = "Swap Select and Back: ";
-    ((MenuButton *) item)->Text.append((SwappSelectBackButton ? "Yes" : "No"));
+    ((MenuButton *) item)->Text.append((ovrVirtualBoyGo::global.SwappSelectBackButton ? "Yes" : "No"));
 
-    selectHelp->IconId = SwappSelectBackButton ? textureButtonBIconId : textureButtonAIconId;
-    backHelp->IconId = SwappSelectBackButton ? textureButtonAIconId : textureButtonBIconId;
+    selectHelp->IconId = ovrVirtualBoyGo::global.SwappSelectBackButton ? ovrVirtualBoyGo::global.textureButtonBIconId
+                                                                       : ovrVirtualBoyGo::global.textureButtonAIconId;
+    backHelp->IconId = ovrVirtualBoyGo::global.SwappSelectBackButton ? ovrVirtualBoyGo::global.textureButtonAIconId
+                                                                     : ovrVirtualBoyGo::global.textureButtonBIconId;
 }
 
-uint GetPressedButton(uint &_buttonState, uint &_lastButtonState) {
+uint MenuGo::GetPressedButton(uint &_buttonState, uint &_lastButtonState) {
     return _buttonState & ~_lastButtonState;
 }
 
-void SetMappingText(MenuButton *Button, MappedButton *Mapping) {
-    if (Mapping->IsSet)
-        Button->SetText(MapButtonStr[Mapping->InputDevice * 32 + Mapping->ButtonIndex]);
-    else
-        Button->SetText("-");
+void MenuGo::SetMappingText(MenuButton *Button, ButtonMapper::MappedButton *Mapping) {
+    Button->SetText(Mapping->IsSet ? ButtonMapper::MapButtonStr[Mapping->InputDevice * 32 + Mapping->ButtonIndex] : "-");
 }
 
 // mapping functions
-void UpdateButtonMappingText(MenuItem *item) {
+void MenuGo::UpdateButtonMappingText(MenuItem *item) {
     OVR_LOG_WITH_TAG("Menu", "Update mapping text for %i", item->Tag);
 
-    SetMappingText(((MenuButton *) item), &Emulator::buttonMapping[Emulator::buttonOrder[item->Tag]].Buttons[item->Tag2]);
+    SetMappingText(((MenuButton *) item), &emulator->buttonMapping[emulator->buttonOrder[item->Tag]].Buttons[item->Tag2]);
 }
 
-void UpdateMenuMapping() {
-    mappedButton->SetText(MapButtonStr[
-                                  buttonMappingMenu.Buttons[mappedButton->Tag].InputDevice * 32 +
-                                  buttonMappingMenu.Buttons[mappedButton->Tag].ButtonIndex]);
+void MenuGo::UpdateMenuMapping() {
+    mappedButton->SetText(ButtonMapper::MapButtonStr[buttonMappingMenu.Buttons[mappedButton->Tag].InputDevice * 32 +
+                                                     buttonMappingMenu.Buttons[mappedButton->Tag].ButtonIndex]);
 }
 
-void UpdateEmulatorMapping() {
-    Emulator::UpdateButtonMapping();
+void MenuGo::UpdateEmulatorMapping() {
+    // emulator->UpdateButtonMapping();
     SetMappingText(mappedButton, remapButton);
 }
 
-void OnMenuMappingButtonSelect(MenuItem *item, int direction) {
+void MenuGo::OnMenuMappingButtonSelect(MenuItem *item, int direction) {
     buttonMenuMapMenu.MoveSelection(direction, false);
 }
 
-void OnClickMenuMappingButtonLeft(MenuItem *item) {
+void MenuGo::OnClickMenuMappingButtonLeft(MenuItem *item) {
     buttonMenuMapMenu.CurrentSelection--;
 }
 
-void OnClickMenuMappingButtonRight(MenuItem *item) {
+void MenuGo::OnClickMenuMappingButtonRight(MenuItem *item) {
     buttonMenuMapMenu.CurrentSelection++;
 }
 
-void OnMappingButtonSelect(MenuItem *item, int direction) {
+void MenuGo::OnMappingButtonSelect(MenuItem *item, int direction) {
     buttonEmulatorMapMenu.MoveSelection(direction, false);
 }
 
-void OnClickMappingButtonLeft(MenuItem *item) {
+void MenuGo::OnClickMappingButtonLeft(MenuItem *item) {
     buttonEmulatorMapMenu.CurrentSelection--;
 }
 
-void OnClickMappingButtonRight(MenuItem *item) {
+void MenuGo::OnClickMappingButtonRight(MenuItem *item) {
     buttonEmulatorMapMenu.CurrentSelection++;
 }
 
-void OnClickChangeMenuButtonEnter(MenuItem *item) {
+void MenuGo::OnClickChangeMenuButtonEnter(MenuItem *item) {
     UpdateMapping = true;
     UpdateMappingUseTimer = false;
     remapButton = &buttonMappingMenu.Buttons[item->Tag];
     mappedButton = (MenuButton *) item;
-    updateMappingText = UpdateMenuMapping;
+    updateMappingText = std::bind(&MenuGo::UpdateMenuMapping, this);
 
     mappingButtonLabel->SetText("Menu Button");
     possibleMappingLabel->SetText("(A, B, X, Y,...)");
 }
 
-void OnClickChangeButtonMappingEnter(MenuItem *item) {
+void MenuGo::OnClickChangeButtonMappingEnter(MenuItem *item) {
     UpdateMapping = true;
     UpdateMappingUseTimer = true;
     UpdateMappingTimer = 4.0f;
 
-    remapButton = &Emulator::buttonMapping[Emulator::buttonOrder[item->Tag]].Buttons[item->Tag2];
-    mappedButton = &buttonMapping.at(item->Tag * 2 + item->Tag2);
-    updateMappingText = UpdateEmulatorMapping;
+    remapButton = &emulator->buttonMapping[emulator->buttonOrder[item->Tag]].Buttons[item->Tag2];
+    mappedButton = buttonMapping.at(item->Tag * 2 + item->Tag2).get();
+    updateMappingText = std::bind(&MenuGo::UpdateEmulatorMapping, this);
 
     mappingButtonLabel->SetText("Button");
     possibleMappingLabel->SetText("(A, B, X, Y,...)");
 }
 
-void UpdateButtonMapping(MenuItem *item, uint *_buttonStates, uint *_lastButtonStates) {
+void MenuGo::UpdateButtonMapping(MenuItem *item, uint *_buttonStates, uint *_lastButtonStates) {
     if (!UpdateMapping)
         return;
 
     for (uint i = 0; i < 3; ++i) {
+        // get the buttons that are newly pressed
         uint newButtonState = GetPressedButton(_buttonStates[i], _lastButtonStates[i]);
 
         if (newButtonState) {
-            for (uint j = 0; j < EmuButtonCount; ++j) {
-                if (newButtonState & ButtonMapping[j]) {
-                    OVR_LOG_WITH_TAG("Menu", "mapped to %i", j);
+            for (uint j = 0; j < ButtonMapper::EmuButtonCount; ++j) {
+                if (newButtonState & ButtonMapper::ButtonMapping[j]) {
+                    OVR_LOG_WITH_TAG("Menu", "mapped to %i from device %i", j, i);
                     UpdateMapping = false;
                     remapButton->InputDevice = i;
                     remapButton->ButtonIndex = j;
-                    remapButton->Button = ButtonMapping[j];
                     remapButton->IsSet = true;
                     updateMappingText();
                     break;
@@ -331,434 +607,157 @@ void UpdateButtonMapping(MenuItem *item, uint *_buttonStates, uint *_lastButtonS
     }
 }
 
-void OnClickExit(MenuItem *item) {
-    Emulator::SaveRam();
+void MenuGo::OnClickExit(MenuItem *item) {
+    emulator->SaveRam();
     showExitDialog = true;
 }
 
-void OnClickBackMainMenu() {
-    if (loadedRom) menuOpen = false;
+void MenuGo::OnClickBackMainMenu() {
+    if (loadedRom) ovrVirtualBoyGo::global.menuOpen = false;
 }
 
-void OnClickFollowMode(MenuItem *item) {
-    followHead = !followHead;
-    ((MenuButton *) item)->Text = strMove[followHead ? 0 : 1];
+void MenuGo::OnClickFollowMode(MenuItem *item) {
+    ovrVirtualBoyGo::global.followHead = !ovrVirtualBoyGo::global.followHead;
+    ((MenuButton *) item)->Text = strMove[ovrVirtualBoyGo::global.followHead ? 0 : 1];
 }
 
-void OnClickMoveScreen(MenuItem *item) { StartTransition(&moveMenu, 1); }
+void MenuGo::OnClickMoveScreen(MenuItem *item) { StartTransition(&moveMenu, 1); }
 
-void OnClickMenuMappingScreen(MenuItem *item) { StartTransition(&buttonMenuMapMenu, 1); }
+void MenuGo::OnClickMenuMappingScreen(MenuItem *item) { StartTransition(&buttonMenuMapMenu, 1); }
 
-void OnClickEmulatorMappingScreen(MenuItem *item) {
+void MenuGo::OnClickEmulatorMappingScreen(MenuItem *item) {
     StartTransition(&buttonEmulatorMapMenu, 1);
 }
 
-void OnBackPressedMove() {
+void MenuGo::OnBackPressedMove() {
     StartTransition(&settingsMenu, -1);
 }
 
 float ToDegree(float radian) { return (int) (180.0 / VRAPI_PI * radian * 10) / 10.0F; }
 
-void MoveYaw(MenuItem *item, float dir) {
-    LayerBuilder::screenYaw += dir;
-    ((MenuButton *) item)->Text = "Yaw: " + to_string(LayerBuilder::screenYaw) + "°";
+void MenuGo::MoveYaw(MenuItem *item, float dir) {
+    layerBuilder->screenYaw += dir;
+    ((MenuButton *) item)->Text = "Yaw: " + ToString(layerBuilder->screenYaw) + "°";
 }
 
-void MovePitch(MenuItem *item, float dir) {
-    LayerBuilder::screenPitch += dir;
-    ((MenuButton *) item)->Text = "Pitch: " + to_string(LayerBuilder::screenPitch) + "°";
+void MenuGo::MovePitch(MenuItem *item, float dir) {
+    layerBuilder->screenPitch += dir;
+    ((MenuButton *) item)->Text = "Pitch: " + ToString(layerBuilder->screenPitch) + "°";
 }
 
-void ChangeDistance(MenuItem *item, float dir) {
-    LayerBuilder::radiusMenuScreen -= dir;
+void MenuGo::ChangeDistance(MenuItem *item, float dir) {
+    layerBuilder->radiusMenuScreen -= dir;
 
-    if (LayerBuilder::radiusMenuScreen < MIN_DISTANCE)
-        LayerBuilder::radiusMenuScreen = MIN_DISTANCE;
-    if (LayerBuilder::radiusMenuScreen > MAX_DISTANCE)
-        LayerBuilder::radiusMenuScreen = MAX_DISTANCE;
+    if (layerBuilder->radiusMenuScreen < MIN_DISTANCE)
+        layerBuilder->radiusMenuScreen = MIN_DISTANCE;
+    if (layerBuilder->radiusMenuScreen > MAX_DISTANCE)
+        layerBuilder->radiusMenuScreen = MAX_DISTANCE;
 
-    ((MenuButton *) item)->Text = "Distance: " + to_string(LayerBuilder::radiusMenuScreen);
+    ((MenuButton *) item)->Text = "Distance: " + ToString(layerBuilder->radiusMenuScreen);
 }
 
-void ChangeScale(MenuItem *item, float dir) {
-    LayerBuilder::screenSize -= dir;
+void MenuGo::ChangeScale(MenuItem *item, float dir) {
+    layerBuilder->screenSize -= dir;
 
-    if (LayerBuilder::screenSize < 0.25F) LayerBuilder::screenSize = 0.25F;
-    if (LayerBuilder::screenSize > 2.5F) LayerBuilder::screenSize = 2.5F;
+    if (layerBuilder->screenSize < 0.25F) layerBuilder->screenSize = 0.25F;
+    if (layerBuilder->screenSize > 2.5F) layerBuilder->screenSize = 2.5F;
 
-    ((MenuButton *) item)->Text = "Scale: " + to_string(LayerBuilder::screenSize);
+    ((MenuButton *) item)->Text = "Scale: " + ToString(layerBuilder->screenSize);
 }
 
-void MoveRoll(MenuItem *item, float dir) {
-    LayerBuilder::screenRoll += dir;
-    ((MenuButton *) item)->Text = "Roll: " + to_string(LayerBuilder::screenRoll) + "°";
+void MenuGo::MoveRoll(MenuItem *item, float dir) {
+    layerBuilder->screenRoll += dir;
+    ((MenuButton *) item)->Text = "Roll: " + ToString(layerBuilder->screenRoll) + "°";
 }
 
-void OnClickResetEmulatorMapping(MenuItem *item) {
-    Emulator::ResetButtonMapping();
+void MenuGo::OnClickResetEmulatorMapping(MenuItem *item) {
+    emulator->ResetButtonMapping();
 
-    for (int i = 0; i < Emulator::buttonCount * 2; ++i) {
-        UpdateButtonMappingText(&buttonMapping.at(i));
+    for (int i = 0; i < emulator->buttonCount * 2; ++i) {
+        UpdateButtonMappingText(buttonMapping.at(i).get());
     }
 }
 
-void OnClickResetViewSettings(MenuItem *item) {
-    LayerBuilder::ResetValues();
+void MenuGo::OnClickResetViewSettings(MenuItem *item) {
+    layerBuilder->ResetValues();
 
     // updates the visible values
-    MoveYaw(yawButton, 0);
-    MovePitch(pitchButton, 0);
-    MoveRoll(rollButton, 0);
-    ChangeDistance(distanceButton, 0);
-    ChangeScale(scaleButton, 0);
+    MoveYaw(yawButton.get(), 0);
+    MovePitch(pitchButton.get(), 0);
+    MoveRoll(rollButton.get(), 0);
+    ChangeDistance(distanceButton.get(), 0);
+    ChangeScale(scaleButton.get(), 0);
 }
 
-void OnClickYaw(MenuItem *item) {
-    LayerBuilder::screenYaw = 0;
-    MoveYaw(yawButton, 0);
+void MenuGo::OnClickYaw(MenuItem *item) {
+    layerBuilder->screenYaw = 0;
+    MoveYaw(yawButton.get(), 0);
 }
 
-void OnClickPitch(MenuItem *item) {
-    LayerBuilder::screenPitch = 0;
-    MovePitch(pitchButton, 0);
+void MenuGo::OnClickPitch(MenuItem *item) {
+    layerBuilder->screenPitch = 0;
+    MovePitch(pitchButton.get(), 0);
 }
 
-void OnClickRoll(MenuItem *item) {
-    LayerBuilder::screenRoll = 0;
-    MoveRoll(rollButton, 0);
+void MenuGo::OnClickRoll(MenuItem *item) {
+    layerBuilder->screenRoll = 0;
+    MoveRoll(rollButton.get(), 0);
 }
 
-void OnClickDistance(MenuItem *item) {
-    LayerBuilder::radiusMenuScreen = 5.5F;
-    ChangeDistance(distanceButton, 0);
+void MenuGo::OnClickDistance(MenuItem *item) {
+    layerBuilder->radiusMenuScreen = 5.5F;
+    ChangeDistance(distanceButton.get(), 0);
 }
 
-void OnClickScale(MenuItem *item) {
-    LayerBuilder::screenSize = 1.0F;
-    ChangeScale(scaleButton, 0);
+void MenuGo::OnClickScale(MenuItem *item) {
+    layerBuilder->screenSize = 1.0F;
+    ChangeScale(scaleButton.get(), 0);
 }
 
-void OnClickMoveScreenYawLeft(MenuItem *item) { MoveYaw(item, RotateSpeed); }
+void MenuGo::OnClickMoveScreenYawLeft(MenuItem *item) { MoveYaw(item, RotateSpeed); }
 
-void OnClickMoveScreenYawRight(MenuItem *item) { MoveYaw(item, -RotateSpeed); }
+void MenuGo::OnClickMoveScreenYawRight(MenuItem *item) { MoveYaw(item, -RotateSpeed); }
 
-void OnClickMoveScreenPitchLeft(MenuItem *item) { MovePitch(item, -RotateSpeed); }
+void MenuGo::OnClickMoveScreenPitchLeft(MenuItem *item) { MovePitch(item, -RotateSpeed); }
 
-void OnClickMoveScreenPitchRight(MenuItem *item) { MovePitch(item, RotateSpeed); }
+void MenuGo::OnClickMoveScreenPitchRight(MenuItem *item) { MovePitch(item, RotateSpeed); }
 
-void OnClickMoveScreenRollLeft(MenuItem *item) { MoveRoll(item, -RotateSpeed); }
+void MenuGo::OnClickMoveScreenRollLeft(MenuItem *item) { MoveRoll(item, -RotateSpeed); }
 
-void OnClickMoveScreenRollRight(MenuItem *item) { MoveRoll(item, RotateSpeed); }
+void MenuGo::OnClickMoveScreenRollRight(MenuItem *item) { MoveRoll(item, RotateSpeed); }
 
-void OnClickMoveScreenDistanceLeft(MenuItem *item) { ChangeDistance(item, ZoomSpeed); }
+void MenuGo::OnClickMoveScreenDistanceLeft(MenuItem *item) { ChangeDistance(item, ZoomSpeed); }
 
-void OnClickMoveScreenDistanceRight(MenuItem *item) {
+void MenuGo::OnClickMoveScreenDistanceRight(MenuItem *item) {
     ChangeDistance(item, -ZoomSpeed);
 }
 
-void OnClickMoveScreenScaleLeft(MenuItem *item) { ChangeScale(item, MoveSpeed); }
+void MenuGo::OnClickMoveScreenScaleLeft(MenuItem *item) { ChangeScale(item, MoveSpeed); }
 
-void OnClickMoveScreenScaleRight(MenuItem *item) { ChangeScale(item, -MoveSpeed); }
+void MenuGo::OnClickMoveScreenScaleRight(MenuItem *item) { ChangeScale(item, -MoveSpeed); }
 
-void ResetMenuState() {
+void MenuGo::ResetMenuState() {
     SaveSettings();
-    saveSlot = 0;
-    ChangeSaveSlot(slotButton, 0);
+    ovrVirtualBoyGo::global.saveSlot = 0;
+    ChangeSaveSlot(slotButton.get(), 0);
     currentMenu = &mainMenu;
-    menuOpen = false;
+    ovrVirtualBoyGo::global.menuOpen = false;
     loadedRom = true;
 }
 
-void MenuGo::SetUpMenu() {
-    getVal = java->Env->GetMethodID(clsData, "GetBatteryLevel", "()I");
-
-    OVR_LOG_WITH_TAG("Menu", "Set up Menu");
-    int bigGap = 10;
-    int smallGap = 5;
-
-    OVR_LOG_WITH_TAG("Menu", "got emulator");
-
-    menuItemSize = (fontMenu.FontSize + 4);
-
-    {
-        OVR_LOG_WITH_TAG("Menu", "Set up Rom Selection Menu");
-        Emulator::InitRomSelectionMenu(0, 0, romSelectionMenu);
-
-        romSelectionMenu.CurrentSelection = 0;
-
-        romSelectionMenu.BackPress = OnBackPressedRomList;
-        romSelectionMenu.Init();
-    }
-
-    {
-        // TODO: now that the menu button can be mapped to ever button not so sure what to do with this
-//        menuHelp = new MenuButton(&fontBottom, buttonMappingMenu.Buttons[0].Button == EmuButton_X ? textureButtonXIconId : textureButtonYIconId,
-//                                  "Close Menu", 7, MENU_HEIGHT - BOTTOM_HEIGHT, 0, BOTTOM_HEIGHT, nullptr, nullptr, nullptr);
-//        menuHelp->Color = MenuBottomColor;
-//        bottomBar.MenuItems.push_back(menuHelp);
-
-        backHelp = new MenuButton(&fontBottom, SwappSelectBackButton ? textureButtonAIconId : textureButtonBIconId,
-                                  "Back", MENU_WIDTH - 210, MENU_HEIGHT - BOTTOM_HEIGHT, 0, BOTTOM_HEIGHT, nullptr, nullptr, nullptr);
-        backHelp->Color = MenuBottomColor;
-        bottomBar.MenuItems.push_back(backHelp);
-
-        selectHelp = new MenuButton(&fontBottom, SwappSelectBackButton ? textureButtonBIconId : textureButtonAIconId,
-                                    "Select", MENU_WIDTH - 110, MENU_HEIGHT - BOTTOM_HEIGHT, 0, BOTTOM_HEIGHT, nullptr, nullptr, nullptr);
-        selectHelp->Color = MenuBottomColor;
-        bottomBar.MenuItems.push_back(selectHelp);
-
-        currentBottomBar = &bottomBar;
-    }
-
-    int posX = 20;
-    int posY = HEADER_HEIGHT + 20;
-
-    // -- main menu page --
-    mainMenu.MenuItems.push_back(new MenuButton(&fontMenu, textureResumeId, "Resume Game", posX, posY, OnClickResumGame, nullptr, nullptr));
-    mainMenu.MenuItems.push_back(
-            new MenuButton(&fontMenu, textureResetIconId, "Reset Game", posX, posY += menuItemSize, OnClickResetGame, nullptr, nullptr));
-    slotButton =
-            new MenuButton(&fontMenu, textureSaveSlotIconId, "", posX, posY += menuItemSize + 10, OnClickSaveSlotRight, OnClickSaveSlotLeft,
-                           OnClickSaveSlotRight);
-
-    slotButton->ScrollTimeH = 10;
-    ChangeSaveSlot(slotButton, 0);
-    mainMenu.MenuItems.push_back(slotButton);
-    mainMenu.MenuItems.push_back(
-            new MenuButton(&fontMenu, textureSaveIconId, "Save", posX, posY += menuItemSize, OnClickSaveGame, nullptr, nullptr));
-    mainMenu.MenuItems.push_back(
-            new MenuButton(&fontMenu, textureLoadIconId, "Load", posX, posY += menuItemSize, OnClickLoadGame, nullptr, nullptr));
-    mainMenu.MenuItems.push_back(
-            new MenuButton(&fontMenu, textureLoadRomIconId, "Load Rom", posX, posY += menuItemSize + 10, OnClickLoadRomGame, nullptr, nullptr));
-    mainMenu.MenuItems.push_back(
-            new MenuButton(&fontMenu, textureResetViewIconId, "Reset View", posX, posY += menuItemSize, OnClickResetView, nullptr, nullptr));
-    mainMenu.MenuItems.push_back(
-            new MenuButton(&fontMenu, textureSettingsId, "Settings", posX, posY += menuItemSize, OnClickSettingsGame, nullptr, nullptr));
-    mainMenu.MenuItems.push_back(
-            new MenuButton(&fontMenu, textureExitIconId, "Exit", posX, posY += menuItemSize + 10, OnClickExit, nullptr, nullptr));
-
-    OVR_LOG_WITH_TAG("Menu", "Set up Main Menu");
-    Emulator::InitMainMenu(posX, posY, mainMenu);
-
-    mainMenu.Init();
-    mainMenu.BackPress = OnClickBackMainMenu;
-
-    // -- settings page --
-    posY = HEADER_HEIGHT + 20;
-
-    settingsMenu.MenuItems.push_back(
-            new MenuButton(&fontMenu, textureMappingIconId, "Menu Button Mapping", posX, posY, OnClickMenuMappingScreen, nullptr, nullptr));
-    settingsMenu.MenuItems.push_back(
-            new MenuButton(&fontMenu, textureMappingIconId, "Emulator Button Mapping",
-                           posX, posY += menuItemSize, OnClickEmulatorMappingScreen, nullptr, nullptr));
-    settingsMenu.MenuItems.push_back(
-            new MenuButton(&fontMenu, textureMoveIconId, "Move Screen", posX, posY += menuItemSize, OnClickMoveScreen, nullptr, nullptr));
-    settingsMenu.MenuItems.push_back(
-            new MenuButton(&fontMenu, textureFollowHeadIconId, strMove[followHead ? 0 : 1], posX, posY += menuItemSize + bigGap,
-                           OnClickFollowMode, OnClickFollowMode, OnClickFollowMode));
-
-    OVR_LOG_WITH_TAG("Menu", "Set up Settings Menu");
-    Emulator::InitSettingsMenu(posX, posY, settingsMenu);
-
-    settingsMenu.MenuItems.push_back(
-            new MenuButton(&fontMenu, textureBackIconId, "Save and Back",
-                           posX, posY += menuItemSize + bigGap, OnClickBackAndSave, nullptr, nullptr));
-
-    settingsMenu.MenuItems.push_back(
-            new MenuLabel(&fontVersion, STR_VERSION, MENU_WIDTH - 70, MENU_HEIGHT - BOTTOM_HEIGHT - 50 + 10, 70, 50, textColorVersion));
-
-    settingsMenu.BackPress = OnBackPressedSettings;
-    settingsMenu.Init();
-
-    // -- menu button mapping --
-    posY = HEADER_HEIGHT + 20;
-
-    MenuButton *swapButton =
-            new MenuButton(&fontMenu, textureLoadRomIconId, "", posX, posY, SwapButtonSelectBack, SwapButtonSelectBack, SwapButtonSelectBack);
-    swapButton->UpdateFunction = UpdateButtonMapping;
-    buttonMenuMapMenu.MenuItems.push_back(swapButton);
-
-    posY += menuItemSize;
-
-    // buttons
-    MenuButton *menuMappingButton = new MenuButton(&fontMenu, textureLoadRomIconId, "menu mapped to:", posX, posY, nullptr, nullptr, nullptr);
-    menuMappingButton->Selectable = false;
-    buttonMenuMapMenu.MenuItems.push_back(menuMappingButton);
-
-    // first button
-    MenuButton *menuMappingButton0 = new MenuButton(&fontMenu, 0, MapButtonStr[buttonMappingMenu.Buttons[0].InputDevice * 32 +
-                                                                               buttonMappingMenu.Buttons[0].ButtonIndex], 250, posY,
-                                                    (MENU_WIDTH - 250 - 20) / 2, menuItemSize, OnClickChangeMenuButtonEnter, nullptr, nullptr);
-    menuMappingButton0->Tag = 0;
-    menuMappingButton0->RightFunction = OnClickMenuMappingButtonRight;
-    buttonMenuMapMenu.MenuItems.push_back(menuMappingButton0);
-
-    // second button
-    MenuButton *menuMappingButton1 = new MenuButton(&fontMenu, 0, MapButtonStr[buttonMappingMenu.Buttons[1].InputDevice * 32 +
-                                                                               buttonMappingMenu.Buttons[1].ButtonIndex],
-                                                    250 + (MENU_WIDTH - 250 - 20) / 2, posY,
-                                                    (MENU_WIDTH - 250 - 20) / 2, menuItemSize, OnClickChangeMenuButtonEnter, nullptr, nullptr);
-    menuMappingButton1->Tag = 1;
-    menuMappingButton1->LeftFunction = OnClickMenuMappingButtonLeft;
-    menuMappingButton1->OnSelectFunction = OnMenuMappingButtonSelect;
-    buttonMenuMapMenu.MenuItems.push_back(menuMappingButton1);
-
-    SwapButtonSelectBack(swapButton);
-    SwapButtonSelectBack(swapButton);
-
-    buttonMenuMapMenu.MenuItems.push_back(
-            new MenuButton(&fontMenu, textureBackIconId, "Back", posX, posY += menuItemSize + bigGap, OnClickBackMove, nullptr, nullptr));
-    buttonMenuMapMenu.BackPress = OnBackPressedMove;
-    buttonMenuMapMenu.Init();
-
-
-    // -- emulator button mapping --
-    posY = HEADER_HEIGHT + 10;
-
-    for (int i = 0; i < Emulator::buttonCount; ++i) {
-        OVR_LOG_WITH_TAG("Menu", "Set up mapping for %i", i);
-
-//            MenuLabel *newButtonLabel = new MenuLabel(&fontMenu, "A Button",
-//                                                      posX, posY, 150, menuItemSize,
-//                                                      {0.9f, 0.9f, 0.9f, 0.9f});
-
-        // image of the button
-        auto *newButtonImage = new MenuImage(*Emulator::button_icons[Emulator::buttonOrder[i]],
-                                             80 / 2 - menuItemSize / 2, posY, menuItemSize, menuItemSize, {0.9F, 0.9F, 0.9F, 0.9F});
-        buttonEmulatorMapMenu.MenuItems.push_back(newButtonImage);
-
-        int mappingButtonWidth = (MENU_WIDTH - 80 - 20) / 2;
-        // left button
-        MenuButton *newButtonLeft = new MenuButton(&fontMenu, 0, "abc", 80, posY, mappingButtonWidth, menuItemSize,
-                                                   OnClickChangeButtonMappingEnter, nullptr, nullptr);
-        newButtonLeft->RightFunction = OnClickMappingButtonRight;
-        // @hack: this is only done because the menu currently only really supports lists
-        if (i != 0)
-            newButtonLeft->OnSelectFunction = OnMappingButtonSelect;
-        newButtonLeft->Tag = i;
-        newButtonLeft->Tag2 = 0;
-        UpdateButtonMappingText(newButtonLeft);
-        if (i == 0)
-            newButtonLeft->UpdateFunction = UpdateButtonMapping;
-
-        // right button
-        MenuButton *newButtonRight =
-                new MenuButton(&fontMenu, 0, "abc", 80 + mappingButtonWidth, posY, mappingButtonWidth, menuItemSize,
-                               OnClickChangeButtonMappingEnter, nullptr, nullptr);
-        newButtonRight->LeftFunction = OnClickMappingButtonLeft;
-        // @hack: this is only done because the menu currently only really supports lists
-        newButtonRight->OnSelectFunction = OnMappingButtonSelect;
-        newButtonRight->Tag = i;
-        newButtonRight->Tag2 = 1;
-        UpdateButtonMappingText(newButtonRight);
-
-        buttonMapping.push_back(*newButtonLeft);
-        buttonMapping.push_back(*newButtonRight);
-
-        posY += menuItemSize;
-    }
-
-    // select the first element
-    buttonEmulatorMapMenu.CurrentSelection = (int) buttonEmulatorMapMenu.MenuItems.size();
-
-    // button mapping page
-    for (int i = 0; i < Emulator::buttonCount * 2; ++i)
-        buttonEmulatorMapMenu.MenuItems.push_back(&buttonMapping.at(i));
-
-    buttonEmulatorMapMenu.MenuItems.push_back(
-            new MenuButton(&fontMenu, textureResetViewIconId, "Reset Mapping", posX, posY += bigGap, OnClickResetEmulatorMapping, nullptr,
-                           nullptr));
-    buttonEmulatorMapMenu.MenuItems.push_back(
-            new MenuButton(&fontMenu, textureBackIconId, "Back", posX, posY += menuItemSize - 3, OnClickBackMove, nullptr, nullptr));
-    buttonEmulatorMapMenu.BackPress = OnBackPressedMove;
-    buttonEmulatorMapMenu.Init();
-
-
-    // -- button mapping overlay --
-    buttonMappingOverlay.MenuItems.push_back(new MenuImage(textureWhiteId, 0, 0, MENU_WIDTH, MENU_HEIGHT, {0.0F, 0.0F, 0.0F, 0.8F}));
-    int overlayWidth = 250;
-    int overlayHeight = 80;
-    int margin = 15;
-    buttonMappingOverlay.MenuItems.push_back(
-            new MenuImage(textureWhiteId, MENU_WIDTH / 2 - overlayWidth / 2, MENU_HEIGHT / 2 - overlayHeight / 2 - margin, overlayWidth,
-                          overlayHeight + margin * 2, {0.05F, 0.05F, 0.05F, 0.3F}));
-
-    mappingButtonLabel = new MenuLabel(&fontMenu, "A Button", MENU_WIDTH / 2 - overlayWidth / 2, MENU_HEIGHT / 2 - overlayHeight / 2,
-                                       overlayWidth, overlayHeight / 3, {0.9F, 0.9F, 0.9F, 0.9F});
-    possibleMappingLabel = new MenuLabel(&fontMenu, "(A, B, X, Y)", MENU_WIDTH / 2 - overlayWidth / 2,
-                                         MENU_HEIGHT / 2 + overlayHeight / 2 - overlayHeight / 3, overlayWidth, overlayHeight / 3,
-                                         {0.9F, 0.9F, 0.9F, 0.9F});
-
-    buttonMappingOverlay.MenuItems.push_back(mappingButtonLabel);
-    buttonMappingOverlay.MenuItems.push_back(
-            new MenuLabel(&fontMenu, "Press Button", MENU_WIDTH / 2 - overlayWidth / 2, MENU_HEIGHT / 2 - overlayHeight / 2 + overlayHeight / 3,
-                          overlayWidth, overlayHeight / 3, {0.9F, 0.9F, 0.9F, 0.9F}));
-    buttonMappingOverlay.MenuItems.push_back(possibleMappingLabel);
-
-    // -- move menu page --
-    posY = HEADER_HEIGHT + 20;
-    yawButton = new MenuButton(&fontMenu, texuterLeftRightIconId, "", posX, posY,
-                               OnClickYaw,
-                               OnClickMoveScreenYawLeft, OnClickMoveScreenYawRight);
-    yawButton->ScrollTimeH = 1;
-    pitchButton =
-            new MenuButton(&fontMenu, textureUpDownIconId, "", posX, posY += menuItemSize,
-                           OnClickPitch,
-                           OnClickMoveScreenPitchLeft, OnClickMoveScreenPitchRight);
-    pitchButton->ScrollTimeH = 1;
-    rollButton =
-            new MenuButton(&fontMenu, textureResetIconId, "", posX, posY += menuItemSize,
-                           OnClickRoll,
-                           OnClickMoveScreenRollLeft, OnClickMoveScreenRollRight);
-    rollButton->ScrollTimeH = 1;
-    distanceButton = new MenuButton(&fontMenu, textureDistanceIconId, "", posX, posY += menuItemSize, OnClickDistance, OnClickMoveScreenDistanceLeft,
-                                    OnClickMoveScreenDistanceRight);
-    distanceButton->ScrollTimeH = 1;
-    scaleButton =
-            new MenuButton(&fontMenu, textureScaleIconId, "", posX, posY += menuItemSize,
-                           OnClickScale,
-                           OnClickMoveScreenScaleLeft, OnClickMoveScreenScaleRight);
-    scaleButton->ScrollTimeH = 1;
-
-    moveMenu.MenuItems.push_back(yawButton);
-    moveMenu.MenuItems.push_back(pitchButton);
-    moveMenu.MenuItems.push_back(rollButton);
-    moveMenu.MenuItems.push_back(distanceButton);
-    moveMenu.MenuItems.push_back(scaleButton);
-
-    moveMenu.MenuItems.push_back(
-            new MenuButton(&fontMenu, textureResetViewIconId, "Reset View", posX, posY += menuItemSize + smallGap, OnClickResetViewSettings,
-                           nullptr, nullptr));
-    moveMenu.MenuItems.push_back(
-            new MenuButton(&fontMenu, textureBackIconId, "Back", posX, posY += menuItemSize + bigGap, OnClickBackMove, nullptr, nullptr));
-
-    moveMenu.BackPress = OnBackPressedMove;
-    moveMenu.Init();
-    // --
-
-    currentMenu = &romSelectionMenu;
-
-    // updates the visible values
-    MoveYaw(yawButton, 0);
-    MovePitch(pitchButton, 0);
-    MoveRoll(rollButton, 0);
-    ChangeDistance(distanceButton, 0);
-    ChangeScale(scaleButton, 0);
-}
-
-int UpdateBatteryLevel() {
+int MenuGo::UpdateBatteryLevel() {
     jint bLevel = java->Env->CallIntMethod(java->ActivityObject, getVal);
     int returnValue = (int) bLevel;
     return returnValue;
 }
 
-void CreateScreen() {
+void MenuGo::CreateScreen() {
     // menu layer
-    MenuSwapChain = vrapi_CreateTextureSwapChain(VRAPI_TEXTURE_TYPE_2D, VRAPI_TEXTURE_FORMAT_8888_sRGB, MENU_WIDTH, MENU_HEIGHT, 1, false);
+    MenuSwapChain = vrapi_CreateTextureSwapChain(VRAPI_TEXTURE_TYPE_2D, VRAPI_TEXTURE_FORMAT_8888_sRGB, emulator->MENU_WIDTH, emulator->MENU_HEIGHT, 1, false);
 
     textureIdMenu = vrapi_GetTextureSwapChainHandle(MenuSwapChain, 0);
     glBindTexture(GL_TEXTURE_2D, textureIdMenu);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, MENU_WIDTH, MENU_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE,
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, emulator->MENU_WIDTH, emulator->MENU_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE,
                     nullptr);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
@@ -784,37 +783,40 @@ void CreateScreen() {
     OVR_LOG_WITH_TAG("Menu", "finished creating screens");
 }
 
-void SaveSettings() {
-    std::ofstream saveFile(saveFilePath, std::ios::trunc | std::ios::binary);
-    saveFile.write(reinterpret_cast<const char *>(&SAVE_FILE_VERSION), sizeof(int));
+void MenuGo::SaveSettings() {
 
-    Emulator::SaveEmulatorSettings(&saveFile);
-    saveFile.write(reinterpret_cast<const char *>(&followHead), sizeof(bool));
-    saveFile.write(reinterpret_cast<const char *>(&LayerBuilder::screenPitch), sizeof(float));
-    saveFile.write(reinterpret_cast<const char *>(&LayerBuilder::screenYaw), sizeof(float));
-    saveFile.write(reinterpret_cast<const char *>(&LayerBuilder::screenRoll), sizeof(float));
-    saveFile.write(reinterpret_cast<const char *>(&LayerBuilder::radiusMenuScreen), sizeof(float));
-    saveFile.write(reinterpret_cast<const char *>(&LayerBuilder::screenSize), sizeof(float));
+    std::ofstream saveFile(ovrVirtualBoyGo::global.saveFilePath, std::ios::trunc | std::ios::binary);
+    saveFile.write(reinterpret_cast<const char *>(&emulator->SAVE_FILE_VERSION), sizeof(int));
+
+    emulator->SaveEmulatorSettings(&saveFile);
+    saveFile.write(reinterpret_cast<const char *>(&ovrVirtualBoyGo::global.followHead), sizeof(bool));
+    saveFile.write(reinterpret_cast<const char *>(&layerBuilder->screenPitch), sizeof(float));
+    saveFile.write(reinterpret_cast<const char *>(&layerBuilder->screenYaw), sizeof(float));
+    saveFile.write(reinterpret_cast<const char *>(&layerBuilder->screenRoll), sizeof(float));
+    saveFile.write(reinterpret_cast<const char *>(&layerBuilder->radiusMenuScreen), sizeof(float));
+    saveFile.write(reinterpret_cast<const char *>(&layerBuilder->screenSize), sizeof(float));
     saveFile.write(reinterpret_cast<const char *>(&buttonMappingMenu.Buttons[0].InputDevice), sizeof(int));
     saveFile.write(reinterpret_cast<const char *>(&buttonMappingMenu.Buttons[0].ButtonIndex), sizeof(int));
     saveFile.write(reinterpret_cast<const char *>(&buttonMappingMenu.Buttons[1].InputDevice), sizeof(int));
     saveFile.write(reinterpret_cast<const char *>(&buttonMappingMenu.Buttons[1].ButtonIndex), sizeof(int));
-    saveFile.write(reinterpret_cast<const char *>(&SwappSelectBackButton), sizeof(bool));
+    saveFile.write(reinterpret_cast<const char *>(&ovrVirtualBoyGo::global.SwappSelectBackButton), sizeof(bool));
 
     saveFile.close();
 
     OVR_LOG_WITH_TAG("Menu", "saved settings");
 }
 
-void LoadSettings() {
+void MenuGo::LoadSettings() {
     // default menu buttons
-    buttonMappingMenu.Buttons[0].InputDevice = DeviceGamepad;
-    buttonMappingMenu.Buttons[0].ButtonIndex = 5;
+    buttonMappingMenu.Buttons[0].IsSet = true;
+    buttonMappingMenu.Buttons[0].InputDevice = ButtonMapper::DeviceGamepad;
+    buttonMappingMenu.Buttons[0].ButtonIndex = ButtonMapper::EmuButton_Y;
     // menu button on the left touch controller
-    buttonMappingMenu.Buttons[1].InputDevice = DeviceLeftTouch;
-    buttonMappingMenu.Buttons[1].ButtonIndex = 12;
+    buttonMappingMenu.Buttons[1].IsSet = true;
+    buttonMappingMenu.Buttons[1].InputDevice = ButtonMapper::DeviceLeftTouch;
+    buttonMappingMenu.Buttons[1].ButtonIndex = ButtonMapper::EmuButton_Enter;
 
-    std::ifstream loadFile(saveFilePath, std::ios::in | std::ios::binary | std::ios::ate);
+    std::ifstream loadFile(ovrVirtualBoyGo::global.saveFilePath, std::ios::in | std::ios::binary | std::ios::ate);
     if (loadFile.is_open()) {
         loadFile.seekg(0, std::ios::beg);
 
@@ -822,19 +824,19 @@ void LoadSettings() {
         loadFile.read((char *) &saveFileVersion, sizeof(int));
 
         // only load if the save versions are compatible
-        if (saveFileVersion == SAVE_FILE_VERSION) {
-            Emulator::LoadEmulatorSettings(&loadFile);
-            loadFile.read((char *) &followHead, sizeof(bool));
-            loadFile.read((char *) &LayerBuilder::screenPitch, sizeof(float));
-            loadFile.read((char *) &LayerBuilder::screenYaw, sizeof(float));
-            loadFile.read((char *) &LayerBuilder::screenRoll, sizeof(float));
-            loadFile.read((char *) &LayerBuilder::radiusMenuScreen, sizeof(float));
-            loadFile.read((char *) &LayerBuilder::screenSize, sizeof(float));
+        if (saveFileVersion == emulator->SAVE_FILE_VERSION) {
+            emulator->LoadEmulatorSettings(&loadFile);
+            loadFile.read((char *) &ovrVirtualBoyGo::global.followHead, sizeof(bool));
+            loadFile.read((char *) &layerBuilder->screenPitch, sizeof(float));
+            loadFile.read((char *) &layerBuilder->screenYaw, sizeof(float));
+            loadFile.read((char *) &layerBuilder->screenRoll, sizeof(float));
+            loadFile.read((char *) &layerBuilder->radiusMenuScreen, sizeof(float));
+            loadFile.read((char *) &layerBuilder->screenSize, sizeof(float));
             loadFile.read((char *) &buttonMappingMenu.Buttons[0].InputDevice, sizeof(int));
             loadFile.read((char *) &buttonMappingMenu.Buttons[0].ButtonIndex, sizeof(int));
             loadFile.read((char *) &buttonMappingMenu.Buttons[1].InputDevice, sizeof(int));
             loadFile.read((char *) &buttonMappingMenu.Buttons[1].ButtonIndex, sizeof(int));
-            loadFile.read((char *) &SwappSelectBackButton, sizeof(bool));
+            loadFile.read((char *) &ovrVirtualBoyGo::global.SwappSelectBackButton, sizeof(bool));
         }
 
         // TODO: reset all loaded settings
@@ -845,20 +847,17 @@ void LoadSettings() {
 
         loadFile.close();
     }
-
-    buttonMappingMenu.Buttons[0].Button = ButtonMapping[buttonMappingMenu.Buttons[0].ButtonIndex];
-    buttonMappingMenu.Buttons[1].Button = ButtonMapping[buttonMappingMenu.Buttons[1].ButtonIndex];
 }
 
-void ScanDirectory() {
+void MenuGo::ScanDirectory() {
     DIR *dir;
     struct dirent *ent;
     std::string strFullPath;
 
-    if ((dir = opendir(romFolderPath.c_str())) != nullptr) {
+    if ((dir = opendir(ovrVirtualBoyGo::global.romFolderPath.c_str())) != nullptr) {
         while ((ent = readdir(dir)) != nullptr) {
             strFullPath = "";
-            strFullPath.append(romFolderPath);
+            strFullPath.append(ovrVirtualBoyGo::global.romFolderPath);
             strFullPath.append(ent->d_name);
 
             if (ent->d_type == 8) {
@@ -866,7 +865,7 @@ void ScanDirectory() {
 
                 // check if the filetype is supported by the emulator
                 bool supportedFile = false;
-                for (const auto &supportedFileName : Emulator::supportedFileNames) {
+                for (const auto &supportedFileName : emulator->supportedFileNames) {
                     if (strFilename.find(supportedFileName) !=
                         std::string::npos) {
                         supportedFile = true;
@@ -875,13 +874,13 @@ void ScanDirectory() {
                 }
 
                 if (supportedFile) {
-                    Emulator::AddRom(strFullPath, strFilename);
+                    emulator->AddRom(strFullPath, strFilename);
                 }
             }
         }
         closedir(dir);
 
-        Emulator::SortRomList();
+        emulator->SortRomList();
     } else {
         OVR_LOG_WITH_TAG("Menu", "could not open folder");
     }
@@ -889,7 +888,7 @@ void ScanDirectory() {
     OVR_LOG_WITH_TAG("Menu", "scanned directory");
 }
 
-void SetTimeString(std::string &timeString) {
+void MenuGo::SetTimeString(std::string &timeString) {
     struct timespec res{};
     clock_gettime(CLOCK_REALTIME, &res);
     time_t t = res.tv_sec;  // just in case types aren't the same
@@ -899,25 +898,120 @@ void SetTimeString(std::string &timeString) {
     timeString.clear();
     if (tmv.tm_hour < 10)
         timeString.append("0");
-    timeString.append(to_string(tmv.tm_hour));
+    timeString.append(ToString(tmv.tm_hour));
     timeString.append(":");
     if (tmv.tm_min < 10)
         timeString.append("0");
-    timeString.append(to_string(tmv.tm_min));
+    timeString.append(ToString(tmv.tm_min));
 
-    time_string_width = FontManager::GetWidth(fontTime, timeString);
+    time_string_width = FontManager::GetWidth(ovrVirtualBoyGo::global.fontTime, timeString);
 }
 
-void GetBattryString(std::string &batteryString) {
+void MenuGo::GetBattryString(std::string &batteryString) {
     batteryLevel = UpdateBatteryLevel();
     batteryString.clear();
-    batteryString.append(to_string(batteryLevel));
+    batteryString.append(ToString(batteryLevel));
     batteryString.append("%");
 
-    batter_string_width = FontManager::GetWidth(fontBattery, batteryString);
+    batter_string_width = FontManager::GetWidth(ovrVirtualBoyGo::global.fontBattery, batteryString);
 }
 
-void DrawGUI() {
+void MenuGo::Update(OVRFW::ovrAppl &app, const OVRFW::ovrApplFrameIn &in, OVRFW::ovrRendererOutput &out) {
+    deltaSeconds = in.DeltaSeconds;
+
+    for (int i = 0; i < 3; ++i)
+        lastButtonStates[i] = buttonStatesReal[i];
+
+    // UpdateInput(app);
+    UpdateInputDevices(app, in);
+
+    // update button mapping timer
+    if (UpdateMapping && UpdateMappingUseTimer) {
+        UpdateMappingTimer -= in.DeltaSeconds;
+        mappingButtonLabel->SetText(ToString((int) UpdateMappingTimer));
+
+        if ((int) UpdateMappingTimer <= 0) {
+            UpdateMapping = false;
+            remapButton->IsSet = false;
+            updateMappingText();
+        }
+    }
+
+    if (!ovrVirtualBoyGo::global.menuOpen) {
+        if (transitionPercentage > 0)
+            transitionPercentage -= deltaSeconds / OPEN_MENU_SPEED;
+        if (transitionPercentage < 0)
+            transitionPercentage = 0;
+
+        emulator->Update(in, buttonStates, lastButtonStates);
+    } else {
+        if (transitionPercentage < 1)
+            transitionPercentage += deltaSeconds / OPEN_MENU_SPEED;
+        if (transitionPercentage > 1)
+            transitionPercentage = 1;
+
+        UpdateCurrentMenu(in.DeltaSeconds);
+    }
+
+    // open/close menu
+    if (loadedRom &&
+        ((buttonStates[buttonMappingMenu.Buttons[0].InputDevice] & ButtonMapper::ButtonMapping[buttonMappingMenu.Buttons[0].ButtonIndex] &&
+          !(lastButtonStates[buttonMappingMenu.Buttons[0].InputDevice] & ButtonMapper::ButtonMapping[buttonMappingMenu.Buttons[0].ButtonIndex])) ||
+         (buttonStates[buttonMappingMenu.Buttons[1].InputDevice] & ButtonMapper::ButtonMapping[buttonMappingMenu.Buttons[1].ButtonIndex] &&
+          !(lastButtonStates[buttonMappingMenu.Buttons[1].InputDevice] & ButtonMapper::ButtonMapping[buttonMappingMenu.Buttons[1].ButtonIndex])))) {
+        ovrVirtualBoyGo::global.menuOpen = !ovrVirtualBoyGo::global.menuOpen;
+    }
+
+    layerBuilder->UpdateDirection(in);
+
+    emulator->DrawScreenLayer(in, out);
+
+    if (transitionPercentage > 0) {
+        // menu layer
+        if (ovrVirtualBoyGo::global.menuOpen)
+            DrawGUI();
+
+        float transitionP = sinf((transitionPercentage) * MATH_FLOAT_PIOVER2);
+
+        out.Layers[out.NumLayers].Cylinder = layerBuilder->BuildSettingsCylinderLayer(
+                MenuSwapChain, emulator->MENU_WIDTH, emulator->MENU_HEIGHT, &in.Tracking, ovrVirtualBoyGo::global.followHead, transitionP);
+
+        out.Layers[out.NumLayers].Cylinder.Header.Flags |= VRAPI_FRAME_LAYER_FLAG_CHROMATIC_ABERRATION_CORRECTION;
+        out.Layers[out.NumLayers].Cylinder.Header.Flags |= VRAPI_FRAME_LAYER_FLAG_INHIBIT_SRGB_FRAMEBUFFER;
+
+        out.Layers[out.NumLayers].Cylinder.Header.ColorScale = {transitionP, transitionP, transitionP, transitionP};
+        out.Layers[out.NumLayers].Cylinder.Header.SrcBlend = VRAPI_FRAME_LAYER_BLEND_SRC_ALPHA;
+        out.Layers[out.NumLayers].Cylinder.Header.DstBlend = VRAPI_FRAME_LAYER_BLEND_ONE_MINUS_SRC_ALPHA;
+
+        out.NumLayers++;
+    }
+
+    if (resetView) {
+        layerBuilder->ResetForwardDirection(out);
+        resetView = false;
+    }
+
+    if (showExitDialog) {
+        OVR_LOG("Open menu");
+        showExitDialog = false;
+        vrapi_ShowSystemUI(java, VRAPI_SYS_UI_CONFIRM_QUIT_MENU);
+    }
+}
+
+void MenuGo::UpdateCurrentMenu(float deltaSeconds) {
+    if (isTransitioning) {
+        transitionState -= deltaSeconds / MENU_TRANSITION_SPEED;
+        if (transitionState < 0) {
+            transitionState = 1;
+            isTransitioning = false;
+            currentMenu = nextMenu;
+        }
+    } else {
+        currentMenu->Update(buttonStates, lastButtonStates, deltaSeconds);
+    }
+}
+
+void MenuGo::DrawGUI() {
     glDisable(GL_CULL_FACE);
     glDisable(GL_DEPTH_TEST);
 
@@ -928,219 +1022,73 @@ void DrawGUI() {
     glBindFramebuffer(GL_FRAMEBUFFER, MenuFrameBuffer);
     // Render on the whole framebuffer, complete from the lower left corner to the
     // upper right
-    glViewport(0, 0, MENU_WIDTH, MENU_HEIGHT);
+    glViewport(0, 0, emulator->MENU_WIDTH, emulator->MENU_HEIGHT);
 
-    glClearColor(MenuBackgroundColor.x, MenuBackgroundColor.y, MenuBackgroundColor.z, MenuBackgroundColor.w);
+    glClearColor(ovrVirtualBoyGo::global.MenuBackgroundColor.x, ovrVirtualBoyGo::global.MenuBackgroundColor.y, ovrVirtualBoyGo::global.MenuBackgroundColor.z,
+                 ovrVirtualBoyGo::global.MenuBackgroundColor.w);
     glClear(GL_COLOR_BUFFER_BIT);
 
     // draw the backgroud image
-    //DrawHelper::DrawTexture(textureBackgroundId, 0, 0, menuWidth, menuHeight,
+    //drawHelper->DrawTexture(textureBackgroundId, 0, 0, menuWidth, menuHeight,
     //                        {0.7f,0.7f,0.7f,1.0f}, 0.985f);
 
     // header
-    DrawHelper::DrawTexture(textureWhiteId, 0, 0, MENU_WIDTH, HEADER_HEIGHT, MenuBackgroundOverlayHeader, 1);
-    DrawHelper::DrawTexture(textureWhiteId, 0, MENU_HEIGHT - BOTTOM_HEIGHT, MENU_WIDTH, BOTTOM_HEIGHT, MenuBackgroundOverlayColorLight, 1);
+    drawHelper->DrawTexture(ovrVirtualBoyGo::global.textureWhiteId, 0, 0, emulator->MENU_WIDTH, emulator->HEADER_HEIGHT,
+                            ovrVirtualBoyGo::global.MenuBackgroundOverlayHeader, 1);
+    drawHelper->DrawTexture(ovrVirtualBoyGo::global.textureWhiteId, 0, emulator->MENU_HEIGHT - emulator->BOTTOM_HEIGHT, emulator->MENU_WIDTH,
+                            emulator->BOTTOM_HEIGHT,
+                            ovrVirtualBoyGo::global.MenuBackgroundOverlayColorLight, 1);
 
     // icon
-    //DrawHelper::DrawTexture(textureHeaderIconId, 0, 0, 75, 75, headerTextColor, 1);
+    //drawHelper->DrawTexture(textureHeaderIconId, 0, 0, 75, 75, headerTextColor, 1);
 
-    FontManager::Begin();
-    FontManager::RenderText(fontHeader, STR_HEADER, 15, HEADER_HEIGHT / 2 - fontHeader.PHeight / 2 - fontHeader.PStart, 1.0F, headerTextColor, 1);
+    fontManager->Begin();
+    fontManager->RenderText(ovrVirtualBoyGo::global.fontHeader, emulator->STR_HEADER, 15,
+                            emulator->HEADER_HEIGHT / 2 - ovrVirtualBoyGo::global.fontHeader.PHeight / 2 - ovrVirtualBoyGo::global.fontHeader.PStart, 1.0F,
+                            ovrVirtualBoyGo::global.headerTextColor, 1);
 
     // update the battery string
     int batteryWidth = 10;
-    int maxHeight = fontBattery.PHeight + 1;
+    int maxHeight = ovrVirtualBoyGo::global.fontBattery.PHeight + 1;
     int distX = 15;
     int distY = 2;
-    int batteryPosY = HEADER_HEIGHT / 2 + distY + 3;
+    int batteryPosY = emulator->HEADER_HEIGHT / 2 + distY + 3;
 
     // update the time string
     SetTimeString(time_string);
-    FontManager::RenderText(fontTime, time_string, MENU_WIDTH - time_string_width - distX,
-                            HEADER_HEIGHT / 2 - distY - fontBattery.FontSize +
-                            fontBattery.PStart, 1.0F, textColorBattery, 1);
+    fontManager->RenderText(ovrVirtualBoyGo::global.fontTime, time_string, emulator->MENU_WIDTH - time_string_width - distX,
+                            emulator->HEADER_HEIGHT / 2 - distY - ovrVirtualBoyGo::global.fontBattery.FontSize + ovrVirtualBoyGo::global.fontBattery.PStart,
+                            1.0F,
+                            ovrVirtualBoyGo::global.textColorBattery, 1);
 
     GetBattryString(battery_string);
-    FontManager::RenderText(fontBattery, battery_string, MENU_WIDTH - batter_string_width - batteryWidth - 7 - distX,
-                            HEADER_HEIGHT / 2 + distY + 3, 1.0F, textColorBattery, 1);
+    fontManager->RenderText(ovrVirtualBoyGo::global.fontBattery, battery_string, emulator->MENU_WIDTH - batter_string_width - batteryWidth - 7 - distX,
+                            emulator->HEADER_HEIGHT / 2 + distY + 3, 1.0F, ovrVirtualBoyGo::global.textColorBattery, 1);
 
-    FontManager::Close();
+    fontManager->End();
 
     // draw battery
-    DrawHelper::DrawTexture(textureWhiteId, MENU_WIDTH - batteryWidth - distX - 2 - 2, batteryPosY,
-                            batteryWidth + 4, maxHeight + 4, BatteryBackgroundColor, 1);
+    drawHelper->DrawTexture(ovrVirtualBoyGo::global.textureWhiteId, emulator->MENU_WIDTH - batteryWidth - distX - 2 - 2, batteryPosY,
+                            batteryWidth + 4, maxHeight + 4, ovrVirtualBoyGo::global.BatteryBackgroundColor, 1);
 
     // calculate the battery color
     float colorState = ((batteryLevel * 10) % (1000 / (batteryColorCount))) / (float) (1000 / batteryColorCount);
     int currentColor = (int) (batteryLevel / (100.0F / batteryColorCount));
     ovrVector4f batteryColor = ovrVector4f{
-            BatteryColors[currentColor].x * (1 - colorState) +
-            BatteryColors[currentColor + 1].x * colorState,
-            BatteryColors[currentColor].y * (1 - colorState)
-            + BatteryColors[currentColor + 1].y * colorState,
-            BatteryColors[currentColor].z * (1 - colorState)
-            + BatteryColors[currentColor + 1].z * colorState,
-            BatteryColors[currentColor].w * (1 - colorState)
-            + BatteryColors[currentColor + 1].w * colorState
+            BatteryColors[currentColor].x * (1 - colorState) + BatteryColors[currentColor + 1].x * colorState,
+            BatteryColors[currentColor].y * (1 - colorState) + BatteryColors[currentColor + 1].y * colorState,
+            BatteryColors[currentColor].z * (1 - colorState) + BatteryColors[currentColor + 1].z * colorState,
+            BatteryColors[currentColor].w * (1 - colorState) + BatteryColors[currentColor + 1].w * colorState
     };
 
     int height = (int) (batteryLevel / 100.0F * maxHeight);
 
-    DrawHelper::DrawTexture(textureWhiteId, MENU_WIDTH - batteryWidth - distX - 2, batteryPosY + 2 + maxHeight - height,
+    drawHelper->DrawTexture(ovrVirtualBoyGo::global.textureWhiteId, emulator->MENU_WIDTH - batteryWidth - distX - 2, batteryPosY + 2 + maxHeight - height,
                             batteryWidth, height, batteryColor, 1);
 
     DrawMenu();
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-}
-
-static inline ovrLayerProjection2 vbLayerProjection() {
-    ovrLayerProjection2 layer = {};
-
-    const ovrMatrix4f projectionMatrix = ovrMatrix4f_CreateProjectionFov(90.0F, 90.0F, 0.0F, 0.0F, 0.1F, 0.0F);
-    const ovrMatrix4f texCoordsFromTanAngles = ovrMatrix4f_TanAngleMatrixFromProjection(&projectionMatrix);
-
-    layer.Header.Type = VRAPI_LAYER_TYPE_PROJECTION2;
-    layer.Header.Flags = 0;
-    layer.Header.ColorScale.x = 1.0F;
-    layer.Header.ColorScale.y = 1.0F;
-    layer.Header.ColorScale.z = 1.0F;
-    layer.Header.ColorScale.w = 1.0F;
-    layer.Header.SrcBlend = VRAPI_FRAME_LAYER_BLEND_ONE;
-    layer.Header.DstBlend = VRAPI_FRAME_LAYER_BLEND_ZERO;
-    //layer.Header.SurfaceTextureObject = NULL;
-
-    layer.HeadPose.Pose.Orientation.w = 1.0F;
-
-    for (auto &Texture : layer.Textures) {
-        Texture.TexCoordsFromTanAngles = texCoordsFromTanAngles;
-        Texture.TextureRect.x = -1.0F;
-        Texture.TextureRect.y = -1.0F;
-        Texture.TextureRect.width = 2.0F;
-        Texture.TextureRect.height = 2.0F;
-    }
-
-    return layer;
-}
-
-void UpdateCurrentMenu() {
-    if (isTransitioning) {
-        transitionState -= deltaSeconds / MENU_TRANSITION_SPEED;
-        if (transitionState < 0) {
-            transitionState = 1;
-            isTransitioning = false;
-            currentMenu = nextMenu;
-        }
-    } else {
-        currentMenu->Update(buttonStates, lastButtonStates);
-    }
-}
-
-ovrFrameResult MenuGo::Update(App *app, const ovrFrameInput &vrFrame) {
-    deltaSeconds = vrFrame.DeltaSeconds;
-
-    for (int i = 0; i < 3; ++i)
-        lastButtonStates[i] = buttonStatesReal[i];
-
-    // UpdateInput(app);
-    UpdateInputDevices(app, vrFrame);
-
-    // update button mapping timer
-    if (UpdateMapping && UpdateMappingUseTimer) {
-        UpdateMappingTimer -= vrFrame.DeltaSeconds;
-        mappingButtonLabel->SetText(to_string((int) UpdateMappingTimer));
-
-        if ((int) UpdateMappingTimer <= 0) {
-            UpdateMapping = false;
-            remapButton->IsSet = false;
-            updateMappingText();
-        }
-    }
-
-    if (!menuOpen) {
-        if (transitionPercentage > 0) transitionPercentage -= deltaSeconds / OPEN_MENU_SPEED;
-        if (transitionPercentage < 0) transitionPercentage = 0;
-
-        Emulator::Update(vrFrame, buttonStates, lastButtonStates);
-    } else {
-        if (transitionPercentage < 1) transitionPercentage += deltaSeconds / OPEN_MENU_SPEED;
-        if (transitionPercentage > 1) transitionPercentage = 1;
-
-        UpdateCurrentMenu();
-    }
-
-    // open/close menu
-    if (loadedRom &&
-        ((buttonStates[buttonMappingMenu.Buttons[0].InputDevice] & buttonMappingMenu.Buttons[0].Button &&
-          !(lastButtonStates[buttonMappingMenu.Buttons[0].InputDevice] & buttonMappingMenu.Buttons[0].Button)) ||
-         (buttonStates[buttonMappingMenu.Buttons[1].InputDevice] & buttonMappingMenu.Buttons[1].Button &&
-          !(lastButtonStates[buttonMappingMenu.Buttons[1].InputDevice] & buttonMappingMenu.Buttons[1].Button)))) {
-        menuOpen = !menuOpen;
-    }
-
-    CenterEyeViewMatrix = vrapi_GetViewMatrixFromPose(&vrFrame.Tracking.HeadPose.Pose);
-
-    //res.Surfaces.PushBack( ovrDrawSurface( &SurfaceDef ) );
-
-    // Clear the eye buffers to 0 alpha so the overlay plane shows through.
-    ovrFrameResult res;
-    res.ClearColorBuffer = true;
-    res.ClearColor = Vector4f(0.0F, 0.0F, 0.0F, 1.0F);
-    res.FrameMatrices.CenterView = CenterEyeViewMatrix;
-
-    res.FrameIndex = vrFrame.FrameNumber;
-    res.DisplayTime = vrFrame.PredictedDisplayTimeInSeconds;
-    res.SwapInterval = app->GetSwapInterval();
-
-    res.FrameFlags = 0;
-    res.LayerCount = 0;
-
-    ovrLayerProjection2 &worldLayer = res.Layers[res.LayerCount++].Projection;
-    worldLayer = vbLayerProjection();
-    worldLayer.HeadPose = vrFrame.Tracking.HeadPose;
-
-    for (int eye = 0; eye < VRAPI_FRAME_LAYER_EYE_MAX; eye++) {
-        res.FrameMatrices.EyeView[eye] = vrFrame.Tracking.Eye[eye].ViewMatrix;
-        // Calculate projection matrix using custom near plane value.
-        res.FrameMatrices.EyeProjection[eye] = ovrMatrix4f_CreateProjectionFov(vrFrame.FovX, vrFrame.FovY, 0.0F, 0.0F, 1.0F, 0.0F);
-
-        worldLayer.Textures[eye].ColorSwapChain = vrFrame.ColorTextureSwapChain[eye];
-        worldLayer.Textures[eye].SwapChainIndex = vrFrame.TextureSwapChainIndex;
-        worldLayer.Textures[eye].TexCoordsFromTanAngles = vrFrame.TexCoordsFromTanAngles;
-    }
-
-    LayerBuilder::UpdateDirection(vrFrame);
-    Emulator::DrawScreenLayer(res, vrFrame);
-
-    if (transitionPercentage > 0) {
-        // menu layer
-        if (menuOpen) DrawGUI();
-
-        float transitionP = sinf((transitionPercentage) * MATH_FLOAT_PIOVER2);
-
-        res.Layers[res.LayerCount].Cylinder = LayerBuilder::BuildSettingsCylinderLayer(
-                MenuSwapChain, MENU_WIDTH, MENU_HEIGHT, &vrFrame.Tracking, followHead, transitionP);
-
-        res.Layers[res.LayerCount].Cylinder.Header.Flags |= VRAPI_FRAME_LAYER_FLAG_CHROMATIC_ABERRATION_CORRECTION;
-        res.Layers[res.LayerCount].Cylinder.Header.Flags |= VRAPI_FRAME_LAYER_FLAG_INHIBIT_SRGB_FRAMEBUFFER;
-
-        res.Layers[res.LayerCount].Cylinder.Header.ColorScale = {transitionP, transitionP, transitionP, transitionP};
-        res.Layers[res.LayerCount].Cylinder.Header.SrcBlend = VRAPI_FRAME_LAYER_BLEND_SRC_ALPHA;
-        res.Layers[res.LayerCount].Cylinder.Header.DstBlend = VRAPI_FRAME_LAYER_BLEND_ONE_MINUS_SRC_ALPHA;
-
-        res.LayerCount++;
-    }
-
-    if (resetView) {
-        app->RecenterYaw(false);
-        resetView = false;
-    }
-    if (showExitDialog) {
-        app->ShowSystemUI(VRAPI_SYS_UI_CONFIRM_QUIT_MENU);
-        showExitDialog = false;
-    }
-
-    return res;
 }
 
 void MenuGo::DrawMenu() {
@@ -1169,232 +1117,29 @@ void MenuGo::DrawMenu() {
     }
 
     // draw the current menu
-    currentMenu->Draw(-transitionMoveDir, 0, (1 - progressOut), dist, trProgressOut);
+    currentMenu->Draw(*drawHelper, *fontManager, -transitionMoveDir, 0, (1 - progressOut), dist, trProgressOut);
+
     // draw the next menu fading in
     if (isTransitioning)
-        nextMenu->Draw(transitionMoveDir, 0, (1 - progressIn), dist, trProgressIn);
+        nextMenu->Draw(*drawHelper, *fontManager, transitionMoveDir, 0, (1 - progressIn), dist, trProgressIn);
 
     // draw the bottom bar
-    currentBottomBar->Draw(0, 0, 0, 0, 1);
+    currentBottomBar->Draw(*drawHelper, *fontManager, 0, 0, 0, 0, 1);
 
     if (MappingOverlayPercentage > 0) {
-        buttonMappingOverlay.Draw(0, -1, (1 - sinf(MappingOverlayPercentage * MATH_FLOAT_PIOVER2)), dist, MappingOverlayPercentage);
+        buttonMappingOverlay.Draw(*drawHelper, *fontManager, 0, -1, (1 - sinf(MappingOverlayPercentage * MATH_FLOAT_PIOVER2)), dist, MappingOverlayPercentage);
     }
 
-//    // DEBUG: render the texture of the font with a black background
-//    DrawHelper::DrawTexture(textureWhiteId, 0, 200, fontMenu.FontSize * 30, fontMenu.FontSize * 8, {0.0f, 0.0f, 0.0f, 1.0f}, 1.0f);
+    //    // DEBUG: render the texture of the font with a black background
+//    drawHelper->DrawTexture(textureWhiteId, 0, 200, fontMenu.FontSize * 30, fontMenu.FontSize * 8, {0.0f, 0.0f, 0.0f, 1.0f}, 1.0f);
 //
-//    FontManager::Begin();
-//    FontManager::RenderFontTexture(fontMenu, {1.0f, 1.0f, 1.0f, 1.0f}, 1.0f);
-//    FontManager::Close();
+//    fontManager->Begin();
+//    fontManager->RenderFontTexture(fontMenu, {1.0f, 1.0f, 1.0f, 1.0f}, 1.0f);
+//    fontManager->Close();
 }
 
-
-//---------------------------------------------------------------------------------------------------
-// Input device management
-//---------------------------------------------------------------------------------------------------
-
-std::vector<ovrInputDeviceBase *> InputDevices;
-double LastGamepadUpdateTimeInSeconds;
-
-//==============================
-// ovrVrController::FindInputDevice
-int FindInputDevice(const ovrDeviceID deviceID) {
-    for (int i = 0; i < (int) InputDevices.size(); ++i) {
-        if (InputDevices[i]->GetDeviceID() == deviceID) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-//==============================
-// ovrVrController::RemoveDevice
-void RemoveDevice(const ovrDeviceID deviceID) {
-    int index = FindInputDevice(deviceID);
-    if (index < 0) {
-        return;
-    }
-    ovrInputDeviceBase *device = InputDevices[index];
-    delete device;
-    InputDevices[index] = InputDevices.back();
-    InputDevices[InputDevices.size() - 1] = nullptr;
-    InputDevices.pop_back();
-}
-
-//==============================
-// ovrVrController::IsDeviceTracked
-bool IsDeviceTracked(const ovrDeviceID deviceID) {
-    return FindInputDevice(deviceID) >= 0;
-}
-
-//==============================
-// ovrVrController::OnDeviceConnected
-void OnDeviceConnected(App *app, const ovrInputCapabilityHeader &capsHeader) {
-    ovrInputDeviceBase *device = nullptr;
-    ovrResult result = ovrError_NotInitialized;
-
-    switch (capsHeader.Type) {
-        case ovrControllerType_Gamepad: {
-            OVR_LOG_WITH_TAG("MLBUConnect", "Gamepad connected, ID = %u", capsHeader.DeviceID);
-
-            ovrInputGamepadCapabilities gamepadCapabilities;
-            gamepadCapabilities.Header = capsHeader;
-            result = vrapi_GetInputDeviceCapabilities(app->GetOvrMobile(),
-                                                      &gamepadCapabilities.Header);
-
-            if (result == ovrSuccess)
-                device = ovrInputDevice_Gamepad::Create(*app, gamepadCapabilities);
-
-            break;
-        }
-
-        case ovrControllerType_TrackedRemote: {
-            OVR_LOG_WITH_TAG("MLBUConnect", "Controller connected, ID = %u", capsHeader.DeviceID);
-
-            ovrInputTrackedRemoteCapabilities remoteCapabilities;
-            remoteCapabilities.Header = capsHeader;
-
-            result = vrapi_GetInputDeviceCapabilities(app->GetOvrMobile(),
-                                                      &remoteCapabilities.Header);
-
-            if (result == ovrSuccess) {
-                device = ovrInputDevice_TrackedRemote::Create(*app, remoteCapabilities);
-            }
-            break;
-        }
-
-        default:
-            OVR_LOG("Unknown device connected!");
-            OVR_ASSERT(false);
-            return;
-    }
-
-    if (result != ovrSuccess) {
-        OVR_LOG_WITH_TAG("MLBUConnect", "vrapi_GetInputDeviceCapabilities: Error %i", result);
-    }
-
-    if (device != nullptr) {
-        OVR_LOG_WITH_TAG("MLBUConnect", "Added device '%s', id = %u", device->GetName(),
-                         capsHeader.DeviceID);
-        InputDevices.push_back(device);
-    } else {
-        OVR_LOG_WITH_TAG("MLBUConnect", "Device creation failed for id = %u", capsHeader.DeviceID);
-    }
-}
-
-//==============================
-// ovrVrController::EnumerateInputDevices
-void EnumerateInputDevices(App *app) {
-    for (uint32_t deviceIndex = 0;; deviceIndex++) {
-        ovrInputCapabilityHeader curCaps;
-
-        if (vrapi_EnumerateInputDevices(app->GetOvrMobile(), deviceIndex, &curCaps) < 0) {
-            break;    // no more devices
-        }
-
-        if (!IsDeviceTracked(curCaps.DeviceID)) {
-            OVR_LOG_WITH_TAG("Input", "     tracked");
-            OnDeviceConnected(app, curCaps);
-        }
-    }
-}
-
-//==============================
-// ovrVrController::OnDeviceDisconnected
-void OnDeviceDisconnected(const ovrDeviceID deviceID) {
-    OVR_LOG_WITH_TAG("MLBUConnect", "Controller disconnected, ID = %i", deviceID);
-    RemoveDevice(deviceID);
-}
-
-//==============================
-// ovrInputDevice_Gamepad::Create
-ovrInputDeviceBase *
-ovrInputDevice_Gamepad::Create(App &app, const ovrInputGamepadCapabilities &gamepadCapabilities) {
-    OVR_LOG_WITH_TAG("MLBUConnect", "Gamepad");
-
-    auto *device = new ovrInputDevice_Gamepad(gamepadCapabilities);
-    return device;
-}
-
-//==============================
-// ovrInputDevice_TrackedRemote::Create
-ovrInputDeviceBase *ovrInputDevice_TrackedRemote::Create(App &app,
-                                                         const ovrInputTrackedRemoteCapabilities &remoteCapabilities) {
-    OVR_LOG_WITH_TAG("MLBUConnect", "ovrInputDevice_TrackedRemote::Create");
-
-    ovrInputStateTrackedRemote remoteInputState;
-    remoteInputState.Header.ControllerType = remoteCapabilities.Header.Type;
-    ovrResult result = vrapi_GetCurrentInputState(app.GetOvrMobile(),
-                                                  remoteCapabilities.Header.DeviceID,
-                                                  &remoteInputState.Header);
-
-    if (result == ovrSuccess) {
-        auto *device = new ovrInputDevice_TrackedRemote(remoteCapabilities,
-                                                        remoteInputState.RecenterCount);
-
-        return device;
-    } else {
-        OVR_LOG_WITH_TAG("MLBUConnect", "vrapi_GetCurrentInputState: Error %i", result);
-    }
-
-    return nullptr;
-}
-
-ovrResult PopulateRemoteControllerInfo(App *app, ovrInputDevice_TrackedRemote &trDevice) {
-    ovrDeviceID deviceID = trDevice.GetDeviceID();
-
-    ovrInputStateTrackedRemote remoteInputState;
-    remoteInputState.Header.ControllerType = trDevice.GetType();
-
-    ovrResult result;
-    result = vrapi_GetCurrentInputState(app->GetOvrMobile(), deviceID, &remoteInputState.Header);
-
-    if (result != ovrSuccess) {
-        OVR_LOG_WITH_TAG("MLBUState", "ERROR %i getting remote input state!", result);
-        OnDeviceDisconnected(deviceID);
-        return result;
-    }
-
-    const auto *inputTrackedRemoteCapabilities = reinterpret_cast<const ovrInputTrackedRemoteCapabilities *>( trDevice.GetCaps());
-
-    if (inputTrackedRemoteCapabilities->ControllerCapabilities & ovrControllerCaps_ModelOculusTouch) {
-        if (inputTrackedRemoteCapabilities->ControllerCapabilities & ovrControllerCaps_LeftHand) {
-
-            buttonStatesReal[1] = remoteInputState.Buttons;
-
-            // the directions seem to be mirrored on the touch controllers compared to the gamepad
-            buttonStatesReal[1] |= (remoteInputState.Joystick.x < -0.5f) ? EmuButton_Left : 0;
-            buttonStatesReal[1] |= (remoteInputState.Joystick.x > 0.5f) ? EmuButton_Right : 0;
-            buttonStatesReal[1] |= (remoteInputState.Joystick.y < -0.5f) ? EmuButton_Down : 0;
-            buttonStatesReal[1] |= (remoteInputState.Joystick.y > 0.5f) ? EmuButton_Up : 0;
-
-            buttonStatesReal[1] |= (remoteInputState.IndexTrigger > 0.25f) ? EmuButton_Trigger : 0;
-            buttonStatesReal[1] |= (remoteInputState.GripTrigger > 0.25f) ? EmuButton_GripTrigger : 0;
-
-        } else if (inputTrackedRemoteCapabilities->ControllerCapabilities & ovrControllerCaps_RightHand) {
-
-            buttonStatesReal[2] = remoteInputState.Buttons;
-
-            buttonStatesReal[2] |= (remoteInputState.Joystick.x < -0.5f) ? EmuButton_Left : 0;
-            buttonStatesReal[2] |= (remoteInputState.Joystick.x > 0.5f) ? EmuButton_Right : 0;
-            buttonStatesReal[2] |= (remoteInputState.Joystick.y < -0.5f) ? EmuButton_Down : 0;
-            buttonStatesReal[2] |= (remoteInputState.Joystick.y > 0.5f) ? EmuButton_Up : 0;
-
-            buttonStatesReal[2] |= (remoteInputState.IndexTrigger > 0.25f) ? EmuButton_Trigger : 0;
-            buttonStatesReal[2] |= (remoteInputState.GripTrigger > 0.25f) ? EmuButton_GripTrigger : 0;
-        }
-    }
-
-    if (remoteInputState.RecenterCount != trDevice.GetLastRecenterCount()) {
-        OVR_LOG_WITH_TAG("MLBUState", "**RECENTERED** (%i != %i )", (int) remoteInputState.RecenterCount, (int) trDevice.GetLastRecenterCount());
-        trDevice.SetLastRecenterCount(remoteInputState.RecenterCount);
-    }
-
-    return result;
-}
-
-void UpdateInputDevices(App *app, const ovrFrameInput &vrFrame) {
+void MenuGo::UpdateInputDevices(OVRFW::ovrAppl &app, const OVRFW::ovrApplFrameIn &in) {
+    using namespace ButtonMapper;
 
     for (int i = 0; i < 3; ++i) {
         buttonStatesReal[i] = 0;
@@ -1421,8 +1166,7 @@ void UpdateInputDevices(App *app, const ovrFrameInput &vrFrame) {
             if (deviceID != ovrDeviceIdType_Invalid) {
                 ovrInputStateGamepad gamepadInputState;
                 gamepadInputState.Header.ControllerType = ovrControllerType_Gamepad;
-                ovrResult result = vrapi_GetCurrentInputState(app->GetOvrMobile(), deviceID,
-                                                              &gamepadInputState.Header);
+                ovrResult result = vrapi_GetCurrentInputState(app.GetSessionObject(), deviceID, &gamepadInputState.Header);
 
                 if (result == ovrSuccess &&
                     gamepadInputState.Header.TimeInSeconds >= LastGamepadUpdateTimeInSeconds) {
@@ -1432,18 +1176,20 @@ void UpdateInputDevices(App *app, const ovrFrameInput &vrFrame) {
                     // if they change the order of the buttons this will break
                     buttonStatesReal[0] = gamepadInputState.Buttons;
 
-                    buttonStatesReal[0] |= (gamepadInputState.LeftJoystick.x < -0.5f) ? EmuButton_LeftStickLeft : 0;
-                    buttonStatesReal[0] |= (gamepadInputState.LeftJoystick.x > 0.5f) ? EmuButton_LeftStickRight : 0;
-                    buttonStatesReal[0] |= (gamepadInputState.LeftJoystick.y < -0.5f) ? EmuButton_LeftStickUp : 0;
-                    buttonStatesReal[0] |= (gamepadInputState.LeftJoystick.y > 0.5f) ? EmuButton_LeftStickDown : 0;
+                    buttonStatesReal[0] |= (gamepadInputState.LeftJoystick.x < -0.5f) ? ButtonMapping[EmuButton_LeftStickLeft] : 0;
+                    buttonStatesReal[0] |= (gamepadInputState.LeftJoystick.x > 0.5f) ? ButtonMapping[EmuButton_LeftStickRight] : 0;
+                    buttonStatesReal[0] |= (gamepadInputState.LeftJoystick.y < -0.5f) ? ButtonMapping[EmuButton_LeftStickUp] : 0;
+                    buttonStatesReal[0] |= (gamepadInputState.LeftJoystick.y > 0.5f) ? ButtonMapping[EmuButton_LeftStickDown] : 0;
 
-                    buttonStatesReal[0] |= (gamepadInputState.RightJoystick.x < -0.5f) ? EmuButton_RightStickLeft : 0;
-                    buttonStatesReal[0] |= (gamepadInputState.RightJoystick.x > 0.5f) ? EmuButton_RightStickRight : 0;
-                    buttonStatesReal[0] |= (gamepadInputState.RightJoystick.y < -0.5f) ? EmuButton_RightStickUp : 0;
-                    buttonStatesReal[0] |= (gamepadInputState.RightJoystick.y > 0.5f) ? EmuButton_RightStickDown : 0;
+                    buttonStatesReal[0] |= (gamepadInputState.RightJoystick.x < -0.5f) ? ButtonMapping[EmuButton_RightStickLeft] : 0;
+                    buttonStatesReal[0] |= (gamepadInputState.RightJoystick.x > 0.5f) ? ButtonMapping[EmuButton_RightStickRight] : 0;
+                    buttonStatesReal[0] |= (gamepadInputState.RightJoystick.y < -0.5f) ? ButtonMapping[EmuButton_RightStickUp] : 0;
+                    buttonStatesReal[0] |= (gamepadInputState.RightJoystick.y > 0.5f) ? ButtonMapping[EmuButton_RightStickDown] : 0;
 
-                    buttonStatesReal[0] |= (gamepadInputState.LeftTrigger > 0.25f) ? EmuButton_L2 : 0;
-                    buttonStatesReal[0] |= (gamepadInputState.RightTrigger > 0.25f) ? EmuButton_R2 : 0;
+                    buttonStatesReal[0] |= (gamepadInputState.LeftTrigger > 0.25f) ? ButtonMapping[EmuButton_L2] : 0;
+                    buttonStatesReal[0] |= (gamepadInputState.RightTrigger > 0.25f) ? ButtonMapping[EmuButton_R2] : 0;
+                } else if (result == ovrSuccess) {
+                    OVR_LOG("Gamepad Update Time");
                 }
             }
         } else if (device->GetType() == ovrControllerType_TrackedRemote) {
@@ -1451,8 +1197,7 @@ void UpdateInputDevices(App *app, const ovrFrameInput &vrFrame) {
                 ovrInputDevice_TrackedRemote &trDevice = *dynamic_cast< ovrInputDevice_TrackedRemote *>( device );
 
                 ovrTracking remoteTracking;
-                ovrResult result = vrapi_GetInputTrackingState(
-                        app->GetOvrMobile(), deviceID, vrFrame.PredictedDisplayTimeInSeconds, &remoteTracking);
+                ovrResult result = vrapi_GetInputTrackingState(app.GetSessionObject(), deviceID, in.PredictedDisplayTime, &remoteTracking);
                 if (result != ovrSuccess) {
                     OnDeviceDisconnected(deviceID);
                     continue;
@@ -1470,4 +1215,198 @@ void UpdateInputDevices(App *app, const ovrFrameInput &vrFrame) {
         buttonStates[1] = buttonStatesReal[1];
         buttonStates[2] = buttonStatesReal[2];
     }
+}
+
+ovrResult MenuGo::PopulateRemoteControllerInfo(OVRFW::ovrAppl &app, ovrInputDevice_TrackedRemote &trDevice) {
+    using namespace ButtonMapper;
+
+    ovrDeviceID deviceID = trDevice.GetDeviceID();
+
+    ovrInputStateTrackedRemote remoteInputState;
+    remoteInputState.Header.ControllerType = trDevice.GetType();
+
+    ovrResult result;
+    result = vrapi_GetCurrentInputState(app.GetSessionObject(), deviceID, &remoteInputState.Header);
+
+    if (result != ovrSuccess) {
+        OVR_LOG_WITH_TAG("MLBUState", "ERROR %i getting remote input state!", result);
+        OnDeviceDisconnected(deviceID);
+        return result;
+    }
+
+    const auto *inputTrackedRemoteCapabilities = reinterpret_cast<const ovrInputGamepadCapabilities *>( trDevice.GetCaps());
+
+    if (inputTrackedRemoteCapabilities->ControllerCapabilities & ovrControllerCaps_ModelOculusTouch) {
+        if (inputTrackedRemoteCapabilities->ControllerCapabilities & ovrControllerCaps_LeftHand) {
+
+            buttonStatesReal[1] = remoteInputState.Buttons;
+
+            // the directions seem to be mirrored on the touch controllers compared to the gamepad
+            buttonStatesReal[1] |= (remoteInputState.Joystick.x < -0.5f) ? ButtonMapping[EmuButton_Left] : 0;
+            buttonStatesReal[1] |= (remoteInputState.Joystick.x > 0.5f) ? ButtonMapping[EmuButton_Right] : 0;
+            buttonStatesReal[1] |= (remoteInputState.Joystick.y < -0.5f) ? ButtonMapping[EmuButton_Down] : 0;
+            buttonStatesReal[1] |= (remoteInputState.Joystick.y > 0.5f) ? ButtonMapping[EmuButton_Up] : 0;
+
+            buttonStatesReal[1] |= (remoteInputState.IndexTrigger > 0.25f) ? ButtonMapping[EmuButton_Trigger] : 0;
+            buttonStatesReal[1] |= (remoteInputState.GripTrigger > 0.25f) ? ButtonMapping[EmuButton_GripTrigger] : 0;
+
+        } else if (inputTrackedRemoteCapabilities->ControllerCapabilities & ovrControllerCaps_RightHand) {
+
+            buttonStatesReal[2] = remoteInputState.Buttons;
+
+            buttonStatesReal[2] |= (remoteInputState.Joystick.x < -0.5f) ? ButtonMapping[EmuButton_Left] : 0;
+            buttonStatesReal[2] |= (remoteInputState.Joystick.x > 0.5f) ? ButtonMapping[EmuButton_Right] : 0;
+            buttonStatesReal[2] |= (remoteInputState.Joystick.y < -0.5f) ? ButtonMapping[EmuButton_Down] : 0;
+            buttonStatesReal[2] |= (remoteInputState.Joystick.y > 0.5f) ? ButtonMapping[EmuButton_Up] : 0;
+
+            buttonStatesReal[2] |= (remoteInputState.IndexTrigger > 0.25f) ? ButtonMapping[EmuButton_Trigger] : 0;
+            buttonStatesReal[2] |= (remoteInputState.GripTrigger > 0.25f) ? ButtonMapping[EmuButton_GripTrigger] : 0;
+        }
+    }
+
+    if (remoteInputState.RecenterCount != trDevice.GetLastRecenterCount()) {
+        OVR_LOG_WITH_TAG("MLBUState", "**RECENTERED** (%i != %i )", (int) remoteInputState.RecenterCount, (int) trDevice.GetLastRecenterCount());
+        trDevice.SetLastRecenterCount(remoteInputState.RecenterCount);
+    }
+
+    return result;
+}
+
+//---------------------------------------------------------------------------------------------------
+// Input device management
+//---------------------------------------------------------------------------------------------------
+
+//==============================
+// ovrVrController::FindInputDevice
+int MenuGo::FindInputDevice(const ovrDeviceID deviceID) {
+    for (int i = 0; i < (int) InputDevices.size(); ++i) {
+        if (InputDevices[i]->GetDeviceID() == deviceID) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+//==============================
+// ovrVrController::RemoveDevice
+void MenuGo::RemoveDevice(const ovrDeviceID deviceID) {
+    int index = FindInputDevice(deviceID);
+    if (index < 0) {
+        return;
+    }
+    ovrInputDeviceBase *device = InputDevices[index];
+    delete device;
+    InputDevices[index] = InputDevices.back();
+    InputDevices[InputDevices.size() - 1] = nullptr;
+    InputDevices.pop_back();
+}
+
+//==============================
+// ovrVrController::IsDeviceTracked
+bool MenuGo::IsDeviceTracked(const ovrDeviceID deviceID) {
+    return FindInputDevice(deviceID) >= 0;
+}
+
+//==============================
+// ovrVrController::OnDeviceConnected
+void MenuGo::OnDeviceConnected(OVRFW::ovrAppl &app, const ovrInputCapabilityHeader &capsHeader) {
+    ovrInputDeviceBase *device = nullptr;
+    ovrResult result = ovrError_NotInitialized;
+
+    switch (capsHeader.Type) {
+        case ovrControllerType_Gamepad: {
+            OVR_LOG_WITH_TAG("MLBUConnect", "Gamepad connected, ID = %u", capsHeader.DeviceID);
+
+            ovrInputGamepadCapabilities gamepadCapabilities;
+            gamepadCapabilities.Header = capsHeader;
+            result = vrapi_GetInputDeviceCapabilities(app.GetSessionObject(), &gamepadCapabilities.Header);
+
+            if (result == ovrSuccess)
+                device = ovrInputDevice_Gamepad::Create(gamepadCapabilities);
+
+            break;
+        }
+
+        case ovrControllerType_TrackedRemote: {
+            OVR_LOG_WITH_TAG("MLBUConnect", "Controller connected, ID = %u", capsHeader.DeviceID);
+
+            ovrInputTrackedRemoteCapabilities remoteCapabilities;
+            remoteCapabilities.Header = capsHeader;
+
+            result = vrapi_GetInputDeviceCapabilities(app.GetSessionObject(), &remoteCapabilities.Header);
+
+            if (result == ovrSuccess) {
+                device = ovrInputDevice_TrackedRemote::Create(app, remoteCapabilities);
+            }
+            break;
+        }
+
+        default:
+            OVR_LOG("Unknown device connected!");
+            OVR_ASSERT(false);
+            return;
+    }
+
+    if (result != ovrSuccess) {
+        OVR_LOG_WITH_TAG("MLBUConnect", "vrapi_GetInputDeviceCapabilities: Error %i", result);
+    }
+
+    if (device != nullptr) {
+        OVR_LOG_WITH_TAG("MLBUConnect", "Added device '%s', id = %u", device->GetName(), capsHeader.DeviceID);
+        InputDevices.push_back(device);
+    } else {
+        OVR_LOG_WITH_TAG("MLBUConnect", "Device creation failed for id = %u", capsHeader.DeviceID);
+    }
+}
+
+//==============================
+// ovrVrController::EnumerateInputDevices
+void MenuGo::EnumerateInputDevices(OVRFW::ovrAppl &app) {
+    for (uint32_t deviceIndex = 0;; deviceIndex++) {
+        ovrInputCapabilityHeader curCaps;
+
+        if (vrapi_EnumerateInputDevices(app.GetSessionObject(), deviceIndex, &curCaps) < 0) {
+            break;    // no more devices
+        }
+
+        if (!IsDeviceTracked(curCaps.DeviceID)) {
+            OVR_LOG_WITH_TAG("Input", "     tracked");
+            OnDeviceConnected(app, curCaps);
+        }
+    }
+}
+
+//==============================
+// ovrVrController::OnDeviceDisconnected
+void MenuGo::OnDeviceDisconnected(const ovrDeviceID deviceID) {
+    OVR_LOG_WITH_TAG("MLBUConnect", "Controller disconnected, ID = %i", deviceID);
+    RemoveDevice(deviceID);
+}
+
+//==============================
+// ovrInputDevice_Gamepad::Create
+ovrInputDeviceBase *ovrInputDevice_Gamepad::Create(const ovrInputGamepadCapabilities &gamepadCapabilities) {
+    OVR_LOG_WITH_TAG("MLBUConnect", "Gamepad");
+
+    auto *device = new ovrInputDevice_Gamepad(gamepadCapabilities);
+    return device;
+}
+
+//==============================
+// ovrInputDevice_TrackedRemote::Create
+ovrInputDeviceBase *ovrInputDevice_TrackedRemote::Create(OVRFW::ovrAppl &app, const ovrInputTrackedRemoteCapabilities &remoteCapabilities) {
+    OVR_LOG_WITH_TAG("MLBUConnect", "ovrInputDevice_TrackedRemote::Create");
+
+    ovrInputStateTrackedRemote remoteInputState;
+    remoteInputState.Header.ControllerType = remoteCapabilities.Header.Type;
+    ovrResult result = vrapi_GetCurrentInputState(app.GetSessionObject(), remoteCapabilities.Header.DeviceID, &remoteInputState.Header);
+
+    if (result == ovrSuccess) {
+        auto *device = new ovrInputDevice_TrackedRemote(remoteCapabilities, remoteInputState.RecenterCount);
+        return device;
+    } else {
+        OVR_LOG_WITH_TAG("MLBUConnect", "vrapi_GetCurrentInputState: Error %i", result);
+    }
+
+    return nullptr;
 }

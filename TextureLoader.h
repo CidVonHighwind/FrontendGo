@@ -1,16 +1,12 @@
-#ifndef TEXTURELOADER_H
-#define TEXTURELOADER_H
+#pragma once
 
-#include "App.h"
-
-using namespace OVR;
+#include <GLES3/gl3.h>
+#include "OVR_FileSys.h"
 
 namespace TextureLoader {
 
     GLuint CreateWhiteTexture();
 
-    GLuint Load(App *app, const char *path);
+    GLuint Load(OVRFW::ovrFileSys *fileSys, const char *path);
 
 }  // namespace TextureLoader
-
-#endif

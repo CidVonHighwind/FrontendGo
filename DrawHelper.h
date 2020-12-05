@@ -1,16 +1,22 @@
-#ifndef DRAW_HELPER_H
-#define DRAW_HELPER_H
+#pragma once
 
-#include "App.h"
+#include <glm/glm.hpp>
+#include "Appl.h"
 
-using namespace OVR;
+using namespace OVRFW;
 
-namespace DrawHelper {
+class DrawHelper {
+private:
+    GlProgram glTextureProgram;
 
-    void Init(int MenuWidth, int MenuHeight);
+    GLuint texture_vao;
+    GLuint texture_vbo;
+
+public:
+    void Free();
+
+    void Init(glm::mat4 projection);
 
     void DrawTexture(GLuint textureId, GLfloat posX, GLfloat posY, GLfloat width, GLfloat height, ovrVector4f color, float transparency);
 
-}  // namespace DrawHelper
-
-#endif
+};

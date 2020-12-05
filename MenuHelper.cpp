@@ -1,19 +1,24 @@
+#include <OVR_LogUtils.h>
+#include <VirtualBoyGo/Src/main.h>
 #include "MenuHelper.h"
 #include "FontMaster.h"
 #include "DrawHelper.h"
 #include "Global.h"
 #include "ButtonMapping.h"
+#include "Menu.h"
+
+// MenuItem
 
 MenuItem::MenuItem() {
-    Color = textColor;
-    SelectionColor = textSelectionColor;
+    Color = ovrVirtualBoyGo::global.textColor;
+    SelectionColor = ovrVirtualBoyGo::global.textSelectionColor;
 }
 
 void MenuItem::OnSelect(int direction) {
     if (OnSelectFunction != nullptr) OnSelectFunction(this, direction);
 }
 
-void MenuItem::Update(uint *buttonState, uint *lastButtonState) {
+void MenuItem::Update(uint *buttonState, uint *lastButtonState, float deltaSeconds) {
     if (UpdateFunction != nullptr) UpdateFunction(this, buttonState, lastButtonState);
 }
 
@@ -31,19 +36,13 @@ void MenuItem::Select() { Selected = true; }
 
 void MenuItem::Unselect() { Selected = false; }
 
-void MenuItem::DrawText(float offsetX, float offsetY, float transparency) {}
+void MenuItem::DrawText(FontManager &fontManager, float offsetX, float offsetY, float transparency) {}
 
-void MenuItem::DrawTexture(float offsetX, float offsetY, float transparency) {}
+void MenuItem::DrawTexture(DrawHelper &drawHelper, float offsetX, float offsetY, float transparency) {}
 
-void MenuLabel::DrawText(float offsetX, float offsetY, float transparency) {
-    if (Visible)
-        FontManager::RenderText(*Font, Text, PosX + offsetX + (Selected ? 5 : 0), PosY + offsetY,
-                                1.0f, Color,
-                                transparency);
-}
+// MenuLabel
 
-MenuLabel::MenuLabel(FontManager::RenderFont *font, std::string text, int posX, int posY, int width,
-                     int height, ovrVector4f color) {
+MenuLabel::MenuLabel(FontManager::RenderFont *font, std::string text, int posX, int posY, int width, int height, ovrVector4f color) {
     Font = font;
     Color = color;
 
@@ -55,6 +54,13 @@ MenuLabel::MenuLabel(FontManager::RenderFont *font, std::string text, int posX, 
     SetText(text);
 }
 
+MenuLabel::~MenuLabel() {}
+
+void MenuLabel::DrawText(FontManager &fontManager, float offsetX, float offsetY, float transparency) {
+    if (Visible)
+        fontManager.RenderText(*Font, Text, PosX + offsetX + (Selected ? 5 : 0), PosY + offsetY, 1.0f, Color, transparency);
+}
+
 void MenuLabel::SetText(std::string newText) {
     Text = newText;
     // center text
@@ -63,13 +69,11 @@ void MenuLabel::SetText(std::string newText) {
     PosY = containerY + containerHeight / 2 - Font->PHeight / 2 - Font->PStart;
 }
 
-MenuLabel::~MenuLabel() {}
+// MenuImage
 
-void MenuImage::DrawTexture(float offsetX, float offsetY, float transparency) {
+void MenuImage::DrawTexture(DrawHelper &drawHelper, float offsetX, float offsetY, float transparency) {
     if (Visible)
-        DrawHelper::DrawTexture(ImageId, PosX + offsetX + (Selected ? 5 : 0), PosY + offsetY, Width,
-                                Height,
-                                Color, transparency);
+        drawHelper.DrawTexture(ImageId, PosX + offsetX + (Selected ? 5 : 0), PosY + offsetY, Width, Height, Color, transparency);
 }
 
 MenuImage::MenuImage(GLuint imageId, int posX, int posY, int width, int height, ovrVector4f color) {
@@ -83,8 +87,11 @@ MenuImage::MenuImage(GLuint imageId, int posX, int posY, int width, int height, 
 
 MenuImage::~MenuImage() {}
 
+// MenuButton
+
 MenuButton::MenuButton(FontManager::RenderFont *font, GLuint iconId, std::string text, int posX, int posY,
-                       void (*pressFunction)(MenuItem *), void (*leftFunction)(MenuItem *), void (*rightFunction)(MenuItem *)) {
+                       std::function<void(MenuItem *item)> pressFunction, std::function<void(MenuItem *item)> leftFunction,
+                       std::function<void(MenuItem *item)> rightFunction) {
     PosX = posX;
     PosY = posY;
     IconId = iconId;
@@ -97,7 +104,8 @@ MenuButton::MenuButton(FontManager::RenderFont *font, GLuint iconId, std::string
 }
 
 MenuButton::MenuButton(FontManager::RenderFont *font, GLuint iconId, std::string text, int posX, int posY, int width, int height,
-                       void (*pressFunction)(MenuItem *), void (*leftFunction)(MenuItem *), void (*rightFunction)(MenuItem *)) {
+                       std::function<void(MenuItem *item)> pressFunction, std::function<void(MenuItem *item)> leftFunction,
+                       std::function<void(MenuItem *item)> rightFunction) {
     PosX = posX;
     PosY = posY + (int) (height / 2.0f - font->PHeight / 2.0f) - font->PStart;
     ContainerWidth = width;
@@ -110,17 +118,19 @@ MenuButton::MenuButton(FontManager::RenderFont *font, GLuint iconId, std::string
     SetText(text);
 }
 
-void MenuButton::DrawText(float offsetX, float offsetY, float transparency) {
+MenuButton::~MenuButton() {}
+
+void MenuButton::DrawText(FontManager &fontManager, float offsetX, float offsetY, float transparency) {
     if (Visible)
-        FontManager::RenderText(*Font, Text, PosX + (IconId > 0 ? 33 : 0) + (Selected ? 5 : 0) + offsetX + OffsetX,
-                                PosY + offsetY, 1.0f, Selected ? SelectionColor : Color, transparency);
+        fontManager.RenderText(*Font, Text, PosX + (IconId > 0 ? 33 : 0) + (Selected ? 5 : 0) + offsetX + OffsetX,
+                               PosY + offsetY, 1.0f, Selected ? SelectionColor : Color, transparency);
 }
 
-void MenuButton::DrawTexture(float offsetX, float offsetY, float transparency) {
+void MenuButton::DrawTexture(DrawHelper &drawHelper, float offsetX, float offsetY, float transparency) {
     if (IconId > 0 && Visible)
-        DrawHelper::DrawTexture(IconId, PosX + (Selected ? 5 : 0) + offsetX,
-                                PosY + Font->PStart + Font->PHeight / 2 - 14 + offsetY, 28,
-                                28, Selected ? SelectionColor : Color, transparency);
+        drawHelper.DrawTexture(IconId, PosX + (Selected ? 5 : 0) + offsetX,
+                               PosY + Font->PStart + Font->PHeight / 2 - 14 + offsetY, 28,
+                               28, Selected ? SelectionColor : Color, transparency);
 }
 
 void MenuButton::SetText(std::string newText) {
@@ -132,8 +142,6 @@ void MenuButton::SetText(std::string newText) {
         OffsetX = ContainerWidth / 2 - textWidth / 2;
     }
 }
-
-MenuButton::~MenuButton() {}
 
 int MenuButton::PressedLeft() {
     if (LeftFunction != nullptr) {
@@ -159,35 +167,7 @@ int MenuButton::PressedEnter() {
     return 0;
 }
 
-void MenuContainer::DrawText(float offsetX, float offsetY, float transparency) {
-    for (int i = 0; i < MenuItems.size(); ++i) {
-        MenuItems.at(i)->DrawText(offsetX, offsetY, transparency);
-    }
-}
-
-void MenuContainer::DrawTexture(float offsetX, float offsetY, float transparency) {
-    for (int i = 0; i < MenuItems.size(); ++i) {
-        MenuItems.at(i)->DrawTexture(offsetX, offsetY, transparency);
-    }
-}
-
-int MenuContainer::PressedLeft() { return MenuItems.at(0)->PressedLeft(); }
-
-int MenuContainer::PressedRight() { return MenuItems.at(0)->PressedRight(); }
-
-int MenuContainer::PressedEnter() { return MenuItems.at(0)->PressedEnter(); }
-
-void MenuContainer::Select() {
-    for (int i = 0; i < MenuItems.size(); ++i) {
-        MenuItems.at(i)->Select();
-    }
-}
-
-void MenuContainer::Unselect() {
-    for (int i = 0; i < MenuItems.size(); ++i) {
-        MenuItems.at(i)->Unselect();
-    }
-}
+// Menu
 
 void ClearButtonState(uint *buttonState) {
     for (int i = 0; i < 3; ++i) {
@@ -195,21 +175,26 @@ void ClearButtonState(uint *buttonState) {
     }
 }
 
-void Menu::Update(uint *buttonState, uint *lastButtonState) {
+void Menu::Update(uint *buttonState, uint *lastButtonState, float deltaSeconds) {
+    using namespace ButtonMapper;
+
     MenuItems[CurrentSelection]->Unselect();
 
     if ((buttonState[DeviceGamepad] &
-         (EmuButton_Up | EmuButton_Down | EmuButton_Left | EmuButton_Right |
-          EmuButton_LeftStickUp | EmuButton_LeftStickDown | EmuButton_LeftStickLeft | EmuButton_LeftStickRight)) ||
-        (buttonState[DeviceLeftTouch] & (EmuButton_Up | EmuButton_Down | EmuButton_Left | EmuButton_Right)) ||
-        (buttonState[DeviceRightTouch] & (EmuButton_Up | EmuButton_Down | EmuButton_Left | EmuButton_Right))) {
-        buttonDownCount++;
+         (ButtonMapping[EmuButton_Up] | ButtonMapping[EmuButton_Down] | ButtonMapping[EmuButton_Left] | ButtonMapping[EmuButton_Right] |
+          ButtonMapping[EmuButton_LeftStickUp] | ButtonMapping[EmuButton_LeftStickDown] |
+          ButtonMapping[EmuButton_LeftStickLeft] | ButtonMapping[EmuButton_LeftStickRight])) ||
+        (buttonState[DeviceLeftTouch] &
+         (ButtonMapping[EmuButton_Up] | ButtonMapping[EmuButton_Down] | ButtonMapping[EmuButton_Left] | ButtonMapping[EmuButton_Right])) ||
+        (buttonState[DeviceRightTouch] &
+         (ButtonMapping[EmuButton_Up] | ButtonMapping[EmuButton_Down] | ButtonMapping[EmuButton_Left] | ButtonMapping[EmuButton_Right]))) {
+        buttonDownCount += deltaSeconds;
     } else {
         buttonDownCount = 0;
     }
 
-    for (int i = 0; i < MenuItems.size(); ++i) {
-        MenuItems[i]->Update(buttonState, lastButtonState);
+    for (auto &MenuItem : MenuItems) {
+        MenuItem->Update(buttonState, lastButtonState, deltaSeconds);
     }
 
     if (ButtonPressed(buttonState, lastButtonState, DeviceGamepad, EmuButton_Left) ||
@@ -232,14 +217,14 @@ void Menu::Update(uint *buttonState, uint *lastButtonState) {
         }
     }
 
-    if (ButtonPressed(buttonState, lastButtonState, DeviceGamepad, SwappSelectBackButton ? EmuButton_B : EmuButton_A) ||
-        ButtonPressed(buttonState, lastButtonState, DeviceRightTouch, SwappSelectBackButton ? EmuButton_B : EmuButton_A)) {
+    if (ButtonPressed(buttonState, lastButtonState, DeviceGamepad, ovrVirtualBoyGo::global.SwappSelectBackButton ? EmuButton_B : EmuButton_A) ||
+        ButtonPressed(buttonState, lastButtonState, DeviceRightTouch, ovrVirtualBoyGo::global.SwappSelectBackButton ? EmuButton_B : EmuButton_A)) {
         buttonDownCount -= MenuItems[CurrentSelection]->ScrollTimeH;
         if (MenuItems[CurrentSelection]->PressedEnter() != 0) {
             ClearButtonState(buttonState);
         }
-    } else if (ButtonPressed(buttonState, lastButtonState, DeviceGamepad, SwappSelectBackButton ? EmuButton_A : EmuButton_B) ||
-               ButtonPressed(buttonState, lastButtonState, DeviceRightTouch, SwappSelectBackButton ? EmuButton_A : EmuButton_B)) {
+    } else if (ButtonPressed(buttonState, lastButtonState, DeviceGamepad, ovrVirtualBoyGo::global.SwappSelectBackButton ? EmuButton_A : EmuButton_B) ||
+               ButtonPressed(buttonState, lastButtonState, DeviceRightTouch, ovrVirtualBoyGo::global.SwappSelectBackButton ? EmuButton_A : EmuButton_B)) {
         if (BackPress != nullptr) BackPress();
     }
 
@@ -266,19 +251,19 @@ void Menu::Update(uint *buttonState, uint *lastButtonState) {
     MenuItems[CurrentSelection]->Select();
 }
 
-void Menu::Draw(int transitionDirX, int transitionDirY, float moveProgress, int moveDist,
-                float fadeProgress) {
+void
+Menu::Draw(DrawHelper &drawHelper, FontManager &fontManager, int transitionDirX, int transitionDirY, float moveProgress, int moveDist, float fadeProgress) {
     // draw the menu textures
-    for (uint i = 0; i < MenuItems.size(); i++)
-        MenuItems[i]->DrawTexture(transitionDirX * moveProgress * moveDist,
-                                  transitionDirY * moveProgress * moveDist, fadeProgress);
+    for (auto &MenuItem : MenuItems)
+        MenuItem->DrawTexture(drawHelper, transitionDirX * moveProgress * moveDist, transitionDirY * moveProgress * moveDist, fadeProgress);
 
     // draw menu text
-    FontManager::Begin();
-    for (uint i = 0; i < MenuItems.size(); i++)
-        MenuItems[i]->DrawText(transitionDirX * moveProgress * moveDist,
-                               transitionDirY * moveProgress * moveDist, fadeProgress);
-    FontManager::Close();
+    fontManager.Begin();
+
+    for (auto &MenuItem : MenuItems)
+        MenuItem->DrawText(fontManager, transitionDirX * moveProgress * moveDist, transitionDirY * moveProgress * moveDist, fadeProgress);
+
+    fontManager.End();
 }
 
 void Menu::MoveSelection(int dir, bool onSelect) {
@@ -295,9 +280,8 @@ void Menu::MoveSelection(int dir, bool onSelect) {
 }
 
 bool Menu::ButtonPressed(uint *buttonState, uint *lastButtonState, uint device, uint button) {
-    return (buttonState[device] & button) && (
-            !(lastButtonState[device] & button) ||
-            buttonDownCount > MenuItems[CurrentSelection]->ScrollDelay);
+    return (buttonState[device] & ButtonMapper::ButtonMapping[button]) &&
+           (!(lastButtonState[device] & ButtonMapper::ButtonMapping[button]) || buttonDownCount > MenuItems[CurrentSelection]->ScrollDelay);
 }
 
 void Menu::Init() { MenuItems[CurrentSelection]->Select(); }
