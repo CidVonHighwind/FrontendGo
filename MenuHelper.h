@@ -245,7 +245,7 @@ public:
         if (absDist > 10)
             absDist = 10;
         float speed = cos(MATH_FLOAT_PIOVER2 * 0.9 * (1.0 - absDist / 10.0)) * 2.0;
-        menuListFState += speed * dir * (deltaSeconds * 72.0);
+        menuListFState += speed * dir * (deltaSeconds * 25.0);
 
         // finished moving?
         if ((dir > 0 && menuListFState > menuListState) ||
